@@ -198,4 +198,5 @@ open an issue or pull request on GitHub.
 _“Time not for routine, but only for creativity!” — ProjectCreator 
 
 
----
+### 🏷️ GitHub Topics
+`nuke` • `python` •  `vfx-tools` • `postproduction` • `freelance-tools` • `pipeline` • `folder-structure` • `automation`
