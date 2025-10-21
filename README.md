@@ -165,6 +165,16 @@ presets/
 
 These templates define the base structure for generated Nuke scripts.
 
+
+
+⚠️ **Important:**  
+When creating or editing a preset `.nk` file, **do not rename** the top-level **Read** and **Write** nodes.  
+They must keep the original names:
+- `Read_source`
+- `Write_comp`
+- `Write_preview`
+
+Otherwise, ProjectCreator will not be able to correctly inject file paths and parameters.
 ---
 
 ## 🧑‍💻 Development Notes
