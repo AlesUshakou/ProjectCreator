@@ -1,5 +1,5 @@
 # ProjectCreator.py
-# ProjectCreator v1.10. Aleš Ushakou, 2025
+# ProjectCreator v1.11. Aleš Ushakou, 2025
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
@@ -8,9 +8,10 @@ import traceback
 import importlib
 import dearpygui.dearpygui as dpg
 import sys
+import os
 import configparser
 
-APP_TITLE = "ProjectCreator v1.10"
+APP_TITLE = "ProjectCreator v1.11"
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 VIDEO_EXTS = {".mov", ".mp4", ".mxf"}
@@ -20,6 +21,11 @@ INI_PATH = SCRIPT_DIR / "ProjectCreator.ini"
 HEADER_IMAGE_PATH =  SCRIPT_DIR / "src" / "ProjectCreator_header.png"
 
 OVERWRITE_CHOICES = ["None", "All", "Source", "Nuke Script"]
+
+
+
+
+
 
 # ---------------- Crash Handler ----------------
 def _show_win_message_box(title: str, text: str):
@@ -69,6 +75,45 @@ def _extract_path_from_dialog(app_data) -> str:
         if fp:
             return _dedupe_tail(fp)
     return str(app_data or "")
+
+def _dir_is_effectively_empty(p: Path) -> bool:
+    """True, если папка не существует или в ней нет НЕскрытых элементов."""
+    if not p.exists():
+        return True
+    try:
+        for f in p.iterdir():
+            if not _is_hidden(f):  # у тебя уже есть _is_hidden
+                return False
+    except Exception:
+        return False
+    return True
+
+def _shot_prog_tag(shot_name: str) -> str:
+    # стабильный tag для прогресс-бара конкретного шота
+    return f"shot_prog__{shot_name}"
+
+def _update_shot_progress(shot_name: str, value: float):
+    """Обновляет прогресс (0..1) для шота в таблице, если бар существует."""
+    tag = _shot_prog_tag(shot_name)
+    if dpg.does_item_exist(tag):
+        dpg.set_value(tag, max(0.0, min(1.0, float(value))))
+
+def _list_sequence_files(src_seq_dir: Path) -> list[Path]:
+    files = []
+    for root, dirs, fnames in os.walk(src_seq_dir):
+        # исключаем скрытые папки
+        dirs[:] = [d for d in dirs if not d.startswith('.')]
+        for fn in fnames:
+            if fn.startswith('.'):
+                continue
+            p = Path(root) / fn
+            if p.is_file():
+                files.append(p)
+    return files
+
+
+
+
 
 # ----------- INI robust reading (supports lists without '=') -----------
 def _clean_val(s: str) -> str:
@@ -238,6 +283,7 @@ def _ensure_found_table():
             dpg.add_table_column(label="Type")
             dpg.add_table_column(label="Source")
             dpg.add_table_column(label="Action")
+            dpg.add_table_column(label="Progress")
         dpg.bind_item_theme("found_table", _make_table_theme())
 
 def _clear_found_table():
@@ -249,10 +295,17 @@ def _clear_found_table():
 def _add_item_row(item: dict):
     _ensure_found_table()
     row = dpg.add_table_row(parent="found_table")
+
+    # столбец: Name
     dpg.add_text(item["name"], parent=row)
+    # столбец: Type
     dpg.add_text(item["type"], parent=row)
+    # столбец: Source
     dpg.add_text(str(item["src"]), parent=row)
+    # столбец: Action
     dpg.add_button(label="Remove", user_data=item, callback=_cb_remove_item, parent=row)
+    # столбец: Progress (новое)
+    dpg.add_progress_bar(tag=_shot_prog_tag(item["name"]), parent=row, width=-1, default_value=0.0)
 
 def _cb_remove_item(sender, app_data, user_data):
     global _found_items
@@ -274,15 +327,8 @@ def _create_basic_structure(dest: Path, item: dict):
         _safe_mkdir(shot_dir / sub)
     return shot_dir
 
-# вставить рядом с другими helper'ами в ProjectCreator.py
+
 def _resolve_preset(preset_value: str) -> Path | None:
-    """
-    Попытки разрешить preset_value в существующий файл:
-      1) как задан (абсолютный/относительный)
-      2) рядом со скриптом (SCRIPT_DIR / preset_value)
-      3) в SCRIPT_DIR / 'presets' / preset_value
-    Возвращает Path если найден, иначе None.
-    """
     if not preset_value:
         return None
 
@@ -364,29 +410,89 @@ def _on_create_projects(dest: Path, overwrite_mode: str):
     if not _found_items:
         log("[WARN] Nothing to create.")
         return
+
     overwrite_src = overwrite_mode in ("All", "Source")
-    overwrite_nk = overwrite_mode in ("All", "Nuke Script")
+    overwrite_nk  = overwrite_mode in ("All", "Nuke Script")
     cfg = _read_ini_values()
+
     total = len(_found_items) or 1
     for idx, item in enumerate(_found_items, 1):
-        # per-item progress (optional; simple fraction)
         if dpg.does_item_exist("create_progress"):
             dpg.set_value("create_progress", idx / total)
 
-        shot = _create_basic_structure(dest, item)
+        shot   = _create_basic_structure(dest, item)
         in_dir = shot / "in"
-        if overwrite_src:
-            if in_dir.exists():
-                shutil.rmtree(in_dir)
-            _safe_mkdir(in_dir)
+        _safe_mkdir(in_dir)
+
+        shot_name = item["name"]
+        _update_shot_progress(shot_name, 0.0)  # << добавили
+
+        try:
             if item["type"] == "video":
-                shutil.copy2(item["src"], in_dir / item["src"].name)
+                dst_file = in_dir / item["src"].name
+
+                if overwrite_src:
+                    _safe_copy(item["src"], dst_file)
+                    log(f"[COPY] {item['name']}: {dst_file.name}")
+                else:
+                    if not dst_file.exists():
+                        _safe_copy(item["src"], dst_file)
+                        log(f"[COPY] {item['name']}: {dst_file.name}")
+                    else:
+                        log(f"[SKIP] {item['name']}: {dst_file.name} exists")
+
+                _update_shot_progress(shot_name, 1.0)  # << добавили
+
             else:
-                for f in item["src"].iterdir():
-                    if not _is_hidden(f):
-                        _safe_copy(f, in_dir / f.name)
-        _generate_nuke_script(shot, item, cfg, overwrite_nk)
-    log("✅ Done!")
+                # === Новый блок для секвенций (пофайловое копирование + прогресс) ===
+                src_seq_dir = item["src"]
+                dst_seq_dir = in_dir / src_seq_dir.name
+
+                files = _list_sequence_files(src_seq_dir)
+                total_files = max(len(files), 1)
+                copied = 0
+
+                if overwrite_src:
+                    if dst_seq_dir.exists():
+                        shutil.rmtree(dst_seq_dir, ignore_errors=True)
+                    _safe_mkdir(dst_seq_dir)
+
+                    for sp in files:
+                        rel = sp.relative_to(src_seq_dir)
+                        dp = dst_seq_dir / rel
+                        dp.parent.mkdir(parents=True, exist_ok=True)
+                        _safe_copy(sp, dp)
+                        copied += 1
+                        _update_shot_progress(shot_name, copied / total_files)
+
+                    log(f"[COPY] {item['name']}: seq {dst_seq_dir.name}")
+
+                else:
+                    if not dst_seq_dir.exists():
+                        _safe_mkdir(dst_seq_dir)
+
+                    for sp in files:
+                        rel = sp.relative_to(src_seq_dir)
+                        dp = dst_seq_dir / rel
+                        dp.parent.mkdir(parents=True, exist_ok=True)
+                        if not dp.exists():
+                            _safe_copy(sp, dp)
+                        copied += 1
+                        _update_shot_progress(shot_name, copied / total_files)
+
+                    if copied == 0 and any(dst_seq_dir.iterdir()):
+                        log(f"[SKIP] {item['name']}: seq {dst_seq_dir.name} exists")
+                    else:
+                        log(f"[COPY] {item['name']}: seq {dst_seq_dir.name}")
+
+            _generate_nuke_script(shot, item, cfg, overwrite_nk)
+
+        except Exception as e:
+            log(f"[ERROR] {item.get('name','<unknown>')}: {e}")
+            _update_shot_progress(shot_name, 1.0)  # чтобы не зависал на 0 при ошибке
+
+    log("✅ Copy/Create finished. Done!")
+
 
 # ---------------- Callbacks ----------------
 def _cb_pick_source(sender, app_data, user_data):
@@ -475,7 +581,7 @@ def _build_project_params_tab(parent):
     dpg.add_spacer(height=6, parent=root)
     row_opts = dpg.add_group(parent=root, horizontal=True)
     dpg.add_text("Overwrite if exists:", parent=row_opts)
-    dpg.add_combo(OVERWRITE_CHOICES, default_value="None", tag="overwrite_mode", width=160, parent=row_opts)
+    dpg.add_combo(OVERWRITE_CHOICES, default_value="All", tag="overwrite_mode", width=160, parent=row_opts)
 
     dpg.add_spacer(height=10, parent=root)
     dpg.add_text("Log:", parent=root)

@@ -1,4 +1,4 @@
-# 🎬 ProjectCreator v1.10
+# 🎬 ProjectCreator
 ![Header Screenshot](src/ProjectCreator_header.png)
 _Automated project folder and Nuke script creator — by Aleš Ushakou (2025)_
 
