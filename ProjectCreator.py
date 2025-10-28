@@ -1,462 +1,558 @@
-# ProjectCreator v1.01. Aleš Ushakou, 2025
+# ProjectCreator.py
+# ProjectCreator v1.10. Aleš Ushakou, 2025
 # -*- coding: utf-8 -*-
 
-import sys
-import re
-import shutil
-import threading
-import traceback
 from pathlib import Path
+import shutil
+import traceback
+import importlib
+import dearpygui.dearpygui as dpg
+import sys
 import configparser
 
+APP_TITLE = "ProjectCreator v1.10"
 SCRIPT_DIR = Path(__file__).resolve().parent
-ERR_LOG_PATH = SCRIPT_DIR / "ProjectCreator_error.log"
-PRESETS_DIR = SCRIPT_DIR / "presets"
-INI_PATH = SCRIPT_DIR / "ProjectCreator.ini"
 
 VIDEO_EXTS = {".mov", ".mp4", ".mxf"}
-SEQ_EXTS   = {".exr", ".dpx", ".tiff", ".tif", ".png", ".jpg", ".jpeg"}
+SEQ_EXTS = {".exr", ".dpx", ".tiff", ".tif", ".png", ".jpg", ".jpeg"}
 
-ITEMS = []
-ROW_IDS = []
-HEADER_TEX_ID = None
+INI_PATH = SCRIPT_DIR / "ProjectCreator.ini"
+HEADER_IMAGE_PATH =  SCRIPT_DIR / "src" / "ProjectCreator_header.png"
 
-def _safe_int(val, default=0):
+OVERWRITE_CHOICES = ["None", "All", "Source", "Nuke Script"]
+
+# ---------------- Crash Handler ----------------
+def _show_win_message_box(title: str, text: str):
     try:
-        return int(str(val).strip())
-    except Exception:
-        return default
-
-def _log_early(msg: str):
-    try:
-        with ERR_LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(msg.rstrip() + "\n")
+        import ctypes
+        MB_OK = 0x0
+        ctypes.windll.user32.MessageBoxW(0, text, title, MB_OK)
     except Exception:
         pass
 
-def _install_global_exception_hook():
-    import traceback as _tb, sys as _sys
-    def _hook(exc_type, exc, tb):
-        txt = "".join(_tb.format_exception(exc_type, exc, tb))
-        _log_early("\n=== Unhandled exception ===\n" + txt)
-        print(txt, file=_sys.stderr, flush=True)
-    _sys.excepthook = _hook
+sys.excepthook = lambda exctype, value, tb: _show_win_message_box(
+    "ProjectCreator - Error", f"An error occurred.\n{value}"
+)
 
-_install_global_exception_hook()
+# ---------------- Logging ----------------
+def log(msg: str):
+    print(msg, flush=True)
+    if dpg.does_item_exist("log_console"):
+        dpg.add_text(str(msg), parent="log_console")
 
-try:
-    import dearpygui.dearpygui as dpg
-except Exception as e:
-    _log_early(f"DearPyGUI import error: {e}")
-    raise
+# ---------------- Helpers ----------------
+def _safe_mkdir(p: Path):
+    p.mkdir(parents=True, exist_ok=True)
 
-# --- INI ---
-def load_nuke_cfg():
-    cfg = configparser.ConfigParser()
+def _is_hidden(p: Path) -> bool:
+    return p.name.startswith(".")
+
+def _dedupe_tail(path_str: str) -> str:
+    if not path_str:
+        return path_str
+    p = Path(path_str)
+    parts = p.parts
+    if len(parts) >= 2 and parts[-1].lower() == parts[-2].lower():
+        return str(Path(*parts[:-1]))
+    return path_str
+
+def _extract_path_from_dialog(app_data) -> str:
+    # DearPyGui dialog returns a dict; normalize to a clean path string
+    if isinstance(app_data, dict):
+        sels = app_data.get("selections") or {}
+        if sels:
+            return _dedupe_tail(next(iter(sels.values())))
+        cp = app_data.get("current_path")
+        if cp:
+            return _dedupe_tail(cp)
+        fp = app_data.get("file_path_name")
+        if fp:
+            return _dedupe_tail(fp)
+    return str(app_data or "")
+
+# ----------- INI robust reading (supports lists without '=') -----------
+def _clean_val(s: str) -> str:
+    """Remove literal \n, quotes and trim spaces."""
+    if s is None:
+        return ""
+    return s.replace("\\n", "").strip().strip("'").strip('"').strip()
+
+def _cfg_get_any(sec, *keys, default=""):
+    """Try multiple key spellings (case/space-insensitive)."""
+    if not sec:
+        return default
+    for k in keys:
+        if k in sec:
+            return _clean_val(sec.get(k, default))
+        kl = k.lower()
+        for cand in list(sec.keys()):
+            if cand.lower() == kl or cand.replace(" ", "").lower() == kl.replace(" ", ""):
+                return _clean_val(sec.get(cand, default))
+    return default
+
+def _read_list_section(cfg, section_name: str) -> list[str]:
+    """
+    Reads sections like:
+      [FPS]
+      24
+      25
+      30
+    (allow_no_value=True treats each line as a key with value=None)
+    Returns cleaned unique list preserving order.
+    """
+    if section_name not in cfg:
+        return []
+    sec = cfg[section_name]
+    items = list(sec.keys())
+    # include possible key=value forms too
+    for k, v in sec.items():
+        if v and v.strip():
+            items.append(f"{k}={v}")
+    out = []
+    for it in items:
+        it = _clean_val(it)
+        if it:
+            out.append(it)
+    seen = set()
+    uniq = []
+    for x in out:
+        if x not in seen:
+            uniq.append(x)
+            seen.add(x)
+    return uniq
+
+def _read_ini_values() -> dict:
+    """
+    Flexible INI reader:
+    - supports list-like sections without '='
+    - cleans quotes and literal \n if they accidentally got into file
+    Returns minimal dict used by ProjectCreator.
+    """
+    cfg = configparser.ConfigParser(allow_no_value=True, strict=False, interpolation=None)
+    cfg.optionxform = str  # keep key case
     if INI_PATH.exists():
         try:
             cfg.read(INI_PATH, encoding="utf-8")
         except Exception as e:
-            _log_early(f"INI read error: {e}")
-    section = cfg["nuke"] if "nuke" in cfg else {}
-    color_model = section.get("color_model", "Nuke")
-    colorspace = section.get("colorspace", "linear")
-    fps = section.get("fps", "25")
-    first_frame = _safe_int(section.get("first_frame", "1"), 1)
-    preset_name = section.get("preset", "")
-    preset_path = (PRESETS_DIR / preset_name) if preset_name else None
+            log(f"[WARN] INI parse issue: {e}. Trying to clean \\n/quotes and re-read.")
+            txt = INI_PATH.read_text(encoding="utf-8")
+            txt2 = txt.replace("\\n", "")
+            INI_PATH.write_text(txt2, encoding="utf-8")
+            cfg.read(INI_PATH, encoding="utf-8")
+
+    nuke_sec = cfg["nuke"] if "nuke" in cfg else {}
+
+    preset      = _cfg_get_any(nuke_sec, "preset", default="")
+    color_model = _cfg_get_any(nuke_sec, "color_model", "ColorModel", default="Nuke")
+    colorspace  = _cfg_get_any(nuke_sec, "colorspace", "ColorSpace", default="AlexaV3LogC")
+    first_frame = _cfg_get_any(nuke_sec, "First frame", "FirstFrame", default="1001")
+    fps         = _cfg_get_any(nuke_sec, "FPS", default="25")
+
+    # Optional lists (for other UIs like nuke_params.py)
+    fps_list         = _read_list_section(cfg, "FPS")
+    first_frame_list = _read_list_section(cfg, "First.frame")
+    colors_nuke      = _read_list_section(cfg, "colorspaces.Nuke")
+    colors_aces      = _read_list_section(cfg, "colorspaces.ACES")
+
     return {
+        "preset": preset,
         "color_model": color_model,
         "colorspace": colorspace,
-        "fps": fps,
         "first_frame": first_frame,
-        "preset_path": preset_path if (preset_path and preset_path.exists()) else None
+        "fps": fps,
+        "_lists": {
+            "FPS": fps_list,
+            "First.frame": first_frame_list,
+            "colorspaces.Nuke": colors_nuke,
+            "colorspaces.ACES": colors_aces,
+        }
     }
 
-# --- helpers ---
-def is_sequence_folder(folder: Path) -> bool:
-    if not folder.is_dir():
+def _import_create_nk():
+    try:
+        return importlib.import_module("create_nk")
+    except Exception as e:
+        log(f"[ERROR] Can't import create_nk.py: {e}")
+        log(traceback.format_exc())
+        return None
+
+# ---------------- File scan ----------------
+_found_items = []
+
+def _is_sequence_dir(d: Path) -> bool:
+    if not d.is_dir() or _is_hidden(d):
         return False
-    for p in folder.iterdir():
-        if p.is_file() and p.suffix.lower() in SEQ_EXTS:
-            return True
+    try:
+        for child in d.iterdir():
+            if _is_hidden(child):
+                continue
+            if child.is_file() and child.suffix.lower() in SEQ_EXTS:
+                return True
+    except Exception:
+        return False
     return False
 
-def scan_resources_with_progress(src_dir: Path, progress_tag: str):
-    items = []
-    entries = list(sorted(src_dir.iterdir()))
-    total = max(len(entries), 1)
-    for i, entry in enumerate(entries, 1):
-        if entry.is_file() and entry.suffix.lower() in VIDEO_EXTS:
-            items.append({"type": "video", "name": entry.stem, "src": entry})
-        elif entry.is_dir() and is_sequence_folder(entry):
-            items.append({"type": "sequence", "name": entry.name, "src": entry})
-        dpg.set_value(progress_tag, i / total)
-    return items
-
-def log(msg: str):
-    if dpg.does_item_exist("log_region"):
-        try:
-            dpg.add_text(msg, parent="log_region")
-        except Exception as e:
-            _log_early(f"[UI log err] {e}: {msg}")
-    else:
-        _log_early(msg)
-    print(msg, flush=True)
-
-def set_progress(tag: str, value: float):
-    if dpg.does_item_exist(tag):
-        dpg.set_value(tag, value)
-
-def enable_ui(enabled: bool):
-    for tag in ("scan_btn", "create_btn", "src_input", "dst_input",
-                "overwrite_chk", "opt_plate", "opt_camera"):
-        if dpg.does_item_exist(tag):
-            try:
-                dpg.configure_item(tag, enabled=enabled)
-            except Exception as e:
-                _log_early(f"configure_item err {tag}: {e}")
-
-def ensure_project_folders(project_root: Path, make_plate: bool, make_camera: bool):
-    # убираем лишнюю 'prew'; используем 'preview' (и 'out', 'comp', 'in')
-    subfolders = ["in", "preview", "comp", "out"]
-    if make_plate:
-        subfolders.append("plate")
-    if make_camera:
-        subfolders.append("camera")
-    for sf in subfolders:
-        (project_root / sf).mkdir(parents=True, exist_ok=True)
-
-# --- NK generation (via create_nk) ---
-def write_initial_nuke_script(project_root: Path, project_name: str, item: dict):
-    from create_nk import generate_nk_text  # импорт локально
-    cfg = load_nuke_cfg()
-    comp_dir = project_root / "comp"
-    comp_dir.mkdir(parents=True, exist_ok=True)
-    nk_path = comp_dir / f"{project_name}_comp_v001.nk"
-    if nk_path.exists():
-        log(f"Skip (exists): {nk_path}")
+def scan_resources(src_dir: Path):
+    global _found_items
+    _found_items = []
+    _clear_found_table()
+    if not src_dir.exists():
+        log("[ERROR] Source folder invalid.")
         return
-    nk_text = generate_nk_text(cfg, project_name, item, preset_path=cfg.get("preset_path"), log=log)
-    try:
-        nk_path.write_text(nk_text, encoding="utf-8")
-        log(f"Created Nuke script -> {nk_path}")
-    except Exception as e:
-        log(f"[ERROR] Can't write Nuke script: {nk_path} :: {e}")
 
-# --- copy ---
-def do_copy(items, dst_root: Path, overwrite: bool, make_plate: bool, make_camera: bool, progress_tag: str):
+    items = [ch for ch in src_dir.iterdir() if not _is_hidden(ch)]
     total = max(len(items), 1)
-    done = 0
-    errors = 0
 
-    for it in list(items):
-        name = it["name"]
-        src_path: Path = it["src"]
-        target_project = dst_root / name
+    for i, child in enumerate(items, 1):
+        if dpg.does_item_exist("scan_progress"):
+            dpg.set_value("scan_progress", i / total)
+        if child.is_file() and child.suffix.lower() in VIDEO_EXTS:
+            it = {"name": child.stem, "type": "video", "src": child}
+            _found_items.append(it)
+            _add_item_row(it)
+        elif _is_sequence_dir(child):
+            it = {"name": child.name, "type": "sequence", "src": child}
+            _found_items.append(it)
+            _add_item_row(it)
+    if not _found_items:
+        log("No valid items found.")
 
-        try:
-            ensure_project_folders(target_project, make_plate, make_camera)
-            write_initial_nuke_script(target_project, name, it)
+# ---------------- Table ----------------
+def _make_table_theme():
+    # alternate row background colors (DPG-compatible across versions)
+    with dpg.theme() as theme:
+        with dpg.theme_component(dpg.mvTable):
+            dpg.add_theme_color(dpg.mvThemeCol_TableRowBg, (35, 35, 40, 255))
+            dpg.add_theme_color(dpg.mvThemeCol_TableRowBgAlt, (48, 48, 55, 255))
+    return theme
 
-            target_in = target_project / "in"
+def _ensure_found_table():
+    if not dpg.does_item_exist("found_table"):
+        with dpg.table(tag="found_table", header_row=True, resizable=True,
+                       reorderable=True, row_background=True,
+                       borders_innerH=True, borders_outerH=True,
+                       borders_innerV=True, borders_outerV=True,
+                       policy=dpg.mvTable_SizingStretchProp,
+                       parent="found_table_region"):
+            dpg.add_table_column(label="Name")
+            dpg.add_table_column(label="Type")
+            dpg.add_table_column(label="Source")
+            dpg.add_table_column(label="Action")
+        dpg.bind_item_theme("found_table", _make_table_theme())
 
-            if it["type"] == "video":
-                dst_file = target_in / src_path.name
-                if dst_file.exists() and not overwrite:
-                    log(f"Skip (exists): {dst_file}")
-                else:
-                    shutil.copy2(src_path, dst_file)
-                    log(f"Copied video -> {dst_file}")
-            else:
-                dst_seq_folder = target_in / src_path.name
-                if dst_seq_folder.exists():
-                    if overwrite:
-                        shutil.rmtree(dst_seq_folder)
-                        log(f"Removed (overwrite): {dst_seq_folder}")
-                    else:
-                        log(f"Skip (exists): {dst_seq_folder}")
-                if (not dst_seq_folder.exists()) or overwrite:
-                    shutil.copytree(src_path, dst_seq_folder)
-                    log(f"Copied sequence folder -> {dst_seq_folder}")
+def _clear_found_table():
+    _ensure_found_table()
+    rows = dpg.get_item_children("found_table", 1) or []
+    for r in rows:
+        dpg.delete_item(r)
 
-        except Exception as e:
-            errors += 1
-            log(f"[ERROR] {name}: {e}")
-            _log_early(f"Copy error for {name}: {e}\n{traceback.format_exc()}")
+def _add_item_row(item: dict):
+    _ensure_found_table()
+    row = dpg.add_table_row(parent="found_table")
+    dpg.add_text(item["name"], parent=row)
+    dpg.add_text(item["type"], parent=row)
+    dpg.add_text(str(item["src"]), parent=row)
+    dpg.add_button(label="Remove", user_data=item, callback=_cb_remove_item, parent=row)
 
-        done += 1
-        set_progress(progress_tag, done / total)
+def _cb_remove_item(sender, app_data, user_data):
+    global _found_items
+    _found_items = [x for x in _found_items if x["src"] != user_data["src"]]
+    _clear_found_table()
+    for it in _found_items:
+        _add_item_row(it)
 
-    log("✅ Done: all items processed successfully." if errors == 0 else f"⚠️ Done with {errors} error(s).")
-
-# --- table UI ---
-def clear_table_rows():
-    global ROW_IDS
-    for rid in ROW_IDS:
-        if dpg.does_item_exist(rid):
-            dpg.delete_item(rid)
-    ROW_IDS = []
-
-def refresh_items_table():
-    clear_table_rows()
-    for idx, it in enumerate(ITEMS):
-        with dpg.table_row(parent="found_table") as row_id:
-            dpg.add_text(it["type"])
-            dpg.add_text(it["name"])
-            dpg.add_text(str(it["src"]))
-            dpg.add_button(label="Remove", callback=cb_remove_item, user_data=idx)
-        ROW_IDS.append(row_id)
-
-# --- file dialogs ---
-def _extract_selected_path(app_data, expect_dir=True) -> str:
-    path = None
-    if isinstance(app_data, dict):
-        sels = app_data.get("selections") or {}
-        if len(sels) >= 1:
-            path = next(iter(sels.values()))
-        if not path:
-            path = app_data.get("file_path_name") or app_data.get("current_path")
+# ---------------- Project creation ----------------
+def _safe_copy(src, dst):
+    if src.is_file():
+        shutil.copy2(src, dst)
     else:
-        path = str(app_data) if app_data is not None else ""
-    if not path:
-        return ""
-    p = Path(path)
-    if expect_dir:
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+
+def _create_basic_structure(dest: Path, item: dict):
+    shot_dir = dest / item["name"]
+    for sub in ("in", "preview", "comp", "out"):
+        _safe_mkdir(shot_dir / sub)
+    return shot_dir
+
+# вставить рядом с другими helper'ами в ProjectCreator.py
+def _resolve_preset(preset_value: str) -> Path | None:
+    """
+    Попытки разрешить preset_value в существующий файл:
+      1) как задан (абсолютный/относительный)
+      2) рядом со скриптом (SCRIPT_DIR / preset_value)
+      3) в SCRIPT_DIR / 'presets' / preset_value
+    Возвращает Path если найден, иначе None.
+    """
+    if not preset_value:
+        return None
+
+    # 1) как задан (может быть абсолютным или относительным к CWD)
+    p = Path(preset_value)
+    if p.is_file():
+        return p.resolve()
+
+    # 2) относительный к папке скрипта
+    p2 = (SCRIPT_DIR / preset_value)
+    if p2.is_file():
+        return p2.resolve()
+
+    # 3) в подпапке presets рядом со скриптом
+    p3 = SCRIPT_DIR / "presets" / Path(preset_value).name
+    if p3.is_file():
+        return p3.resolve()
+
+    # 4) попробуем взять только имя файла (на случай, если в ini был указан полный путь с ошибкой '\' vs '/')
+    p4 = SCRIPT_DIR / "presets" / Path(preset_value).name.replace("\\", "/")
+    if p4.is_file():
+        return p4.resolve()
+
+    return None
+
+
+def _generate_nuke_script(shot_dir: Path, item: dict, cfg: dict, overwrite_nk: bool):
+    """
+    Генерирует .nk, передавая preset_path (Path или None) в create_nk.
+    Теперь логирует, какой пресет используется и корректно обрабатывает ошибку отсутствия пресета.
+    """
+    create_nk = _import_create_nk()
+    if not create_nk:
+        log("[ERROR] create_nk module not available; skipping NK generation.")
+        return
+
+    nk_path = shot_dir / "comp" / f"{item['name']}_comp_v001.nk"
+    if nk_path.exists() and not overwrite_nk:
+        log(f"[SKIP] NK exists: {nk_path.name}")
+        return
+
+    # Получаем строку preset из cfg (если есть)
+    preset_value = cfg.get("preset") if cfg else None
+
+    preset_path = None
+    if preset_value:
+        preset_path = _resolve_preset(preset_value)
+        if preset_path:
+            log(f"[NK] Resolved preset: {preset_path}")
+        else:
+            log(f"[NK][WARN] Preset specified in INI but not found: '{preset_value}'")
+    else:
+        log("[NK] No preset specified in INI (cfg['preset'] empty).")
+
+    try:
+        # передаем Path или None — create_nk обязан бросать FileNotFoundError, если preset не найден
+        nk_text = create_nk.generate_nk_text(cfg, item["name"], item, preset_path, log)
+    except FileNotFoundError as fnf:
+        # create_nk сообщил, что пресета нет — логируем и пропускаем этот shot
+        log(f"[ERROR] create_nk: {fnf}. Skipping .nk creation for {item['name']}")
+        return
+    except Exception as e:
+        # любая другая ошибка — логируем полную трассировку и пропускаем
+        log(f"[ERROR] Unexpected error generating .nk for {item['name']}: {e}")
         try:
-            if p.name and p.parent.name and (p.name == p.parent.name):
-                p = p.parent
+            import traceback
+            traceback_text = traceback.format_exc()
+            log(traceback_text)
         except Exception:
             pass
-    return str(p)
-
-# --- callbacks ---
-def cb_scan():
-    global ITEMS
-    enable_ui(False)
-    if dpg.does_item_exist("log_region"):
-        dpg.delete_item("log_region", children_only=True)
-    set_progress("scan_progress", 0.0)
-
-    try:
-        src = Path(dpg.get_value("src_input")).expanduser()
-    except Exception as e:
-        log(f"[ERROR] Can't read Source path: {e}")
-        enable_ui(True)
         return
 
-    if not src.exists() or not src.is_dir():
-        log(f"[ERROR] Source not found or not a folder: {src}")
-        ITEMS = []
-        refresh_items_table()
-        enable_ui(True)
+    # если дошли сюда — nk_text успешно создан
+    nk_path.write_text(nk_text, encoding="utf-8")
+    log(f"[NK] Created {nk_path}")
+
+
+def _on_create_projects(dest: Path, overwrite_mode: str):
+    if not _found_items:
+        log("[WARN] Nothing to create.")
         return
+    overwrite_src = overwrite_mode in ("All", "Source")
+    overwrite_nk = overwrite_mode in ("All", "Nuke Script")
+    cfg = _read_ini_values()
+    total = len(_found_items) or 1
+    for idx, item in enumerate(_found_items, 1):
+        # per-item progress (optional; simple fraction)
+        if dpg.does_item_exist("create_progress"):
+            dpg.set_value("create_progress", idx / total)
 
-    def worker():
-        global ITEMS
-        try:
-            ITEMS = scan_resources_with_progress(src, "scan_progress")
-            refresh_items_table()
-            log("No .mov/.mp4/.mxf or sequence folders found." if not ITEMS else f"Found {len(ITEMS)} item(s).")
-        except Exception as e:
-            log(f"[ERROR] Scan failed: {e}")
-            _log_early(f"Scan error: {e}\n{traceback.format_exc()}")
-        finally:
-            enable_ui(True)
-
-    threading.Thread(target=worker, daemon=True).start()
-
-def worker_create_projects():
-    enable_ui(False)
-    set_progress("create_progress", 0.0)
-    if dpg.does_item_exist("log_region"):
-        dpg.delete_item("log_region", children_only=True)
-
-    try:
-        dst = Path(dpg.get_value("dst_input")).expanduser()
-        src = Path(dpg.get_value("src_input")).expanduser()
-        overwrite = dpg.get_value("overwrite_chk")
-        make_plate = dpg.get_value("opt_plate")
-        make_camera = dpg.get_value("opt_camera")
-    except Exception as e:
-        log(f"[ERROR] Read UI values failed: {e}")
-        enable_ui(True)
-        return
-
-    if not src.exists() or not src.is_dir():
-        log(f"[ERROR] Source not found or not a folder: {src}")
-        enable_ui(True)
-        return
-    if not dst.exists():
-        try:
-            dst.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            log(f"[ERROR] Cannot create destination: {e}")
-            enable_ui(True)
-            return
-
-    items = ITEMS or scan_resources_with_progress(src, "scan_progress")
-    refresh_items_table()
-    if not items:
-        log("Nothing to process.")
-        enable_ui(True)
-        return
-
-    log(f"Creating projects in: {dst}")
-    try:
-        do_copy(items, dst, overwrite, make_plate, make_camera, "create_progress")
-    except Exception as e:
-        log(f"[ERROR] Create failed: {e}")
-        _log_early(f"Create error: {e}\n{traceback.format_exc()}")
-    finally:
-        enable_ui(True)
-
-def cb_create():
-    threading.Thread(target=worker_create_projects, daemon=True).start()
-
-def cb_pick_src(sender, app_data, user_data):
-    dpg.set_value("src_input", _extract_selected_path(app_data, expect_dir=True))
-
-def cb_pick_dst(sender, app_data, user_data):
-    dpg.set_value("dst_input", _extract_selected_path(app_data, expect_dir=True))
-
-def cb_remove_item(sender, app_data, user_data):
-    global ITEMS
-    idx = user_data
-    if 0 <= idx < len(ITEMS):
-        removed = ITEMS.pop(idx)
-        log(f"Removed from list: {removed['name']}")
-        refresh_items_table()
-
-# --- header image ---
-def try_load_header_image():
-    global HEADER_TEX_ID
-    img_path = SCRIPT_DIR / "ProjectCreator_header.png"
-    if img_path.exists():
-        try:
-            w, h, c, data = dpg.load_image(str(img_path))
-            with dpg.texture_registry(show=False):
-                HEADER_TEX_ID = dpg.add_static_texture(w, h, data, tag="header_texture")
-            return w, h
-        except Exception as e:
-            log(f"[WARN] Can't load header image: {e}")
-    return None, None
-
-# --- UI ---
-def build_ui():
-    dpg.create_context()
-    dpg.configure_app(init_file="", load_init_file=False)
-    dpg.create_viewport(title="ProjectCreator v1.01", width=1060, height=840)
-
-    with dpg.window(label="ProjectCreator v1.01", tag="main_window", pos=(10, 10), width=1040, height=820):
-
-        header_w, header_h = try_load_header_image()
-        with dpg.child_window(autosize_x=True, height=140, border=False):
-            if HEADER_TEX_ID and header_w and header_h:
-                dpg.add_image("header_texture")
+        shot = _create_basic_structure(dest, item)
+        in_dir = shot / "in"
+        if overwrite_src:
+            if in_dir.exists():
+                shutil.rmtree(in_dir)
+            _safe_mkdir(in_dir)
+            if item["type"] == "video":
+                shutil.copy2(item["src"], in_dir / item["src"].name)
             else:
-                with dpg.drawlist(width=1016, height=120):
-                    dpg.draw_rectangle(pmin=(10, 10), pmax=(1006, 110),
-                                       color=(40, 40, 70, 255), fill=(35, 35, 60, 255),
-                                       rounding=12, thickness=2)
-                    dpg.draw_text((30, 40), "ProjectCreator v1.01", color=(220, 230, 255, 255), size=28)
-                    dpg.draw_text((32, 76), "by Ales Ushakou", color=(180, 190, 220, 255), size=16)
+                for f in item["src"].iterdir():
+                    if not _is_hidden(f):
+                        _safe_copy(f, in_dir / f.name)
+        _generate_nuke_script(shot, item, cfg, overwrite_nk)
+    log("✅ Done!")
 
-        dpg.add_separator()
+# ---------------- Callbacks ----------------
+def _cb_pick_source(sender, app_data, user_data):
+    dpg.set_value("source_input", _extract_path_from_dialog(app_data))
 
-        with dpg.tab_bar():
-            with dpg.tab(label="Project Parameters"):
-                dpg.add_spacer(height=4)
+def _cb_pick_dest(sender, app_data, user_data):
+    dpg.set_value("dest_input", _extract_path_from_dialog(app_data))
 
-                with dpg.group(horizontal=True):
-                    dpg.add_input_text(tag="src_input", width=780,
-                                       hint="Source folder with .mov/.mp4/.mxf and/or sequence folders")
-                    dpg.add_button(label="Browse", callback=lambda: dpg.show_item("file_dialog_src"))
+def _cb_scan():
+    src = Path(dpg.get_value("source_input") or "")
+    if not src.exists():
+        log("[ERROR] Invalid source.")
+        return
+    scan_resources(src)
 
-                with dpg.group(horizontal=True):
-                    dpg.add_input_text(tag="dst_input", width=780,
-                                       hint="Destination folder where projects will be created")
-                    dpg.add_button(label="Browse", callback=lambda: dpg.show_item("file_dialog_dst"))
+def _cb_create():
+    dest = Path(dpg.get_value("dest_input") or "")
+    if not dest.exists():
+        log("[ERROR] Invalid destination.")
+        return
+    overwrite_mode = dpg.get_value("overwrite_mode") or "None"
+    _on_create_projects(dest, overwrite_mode)
 
-                dpg.add_separator()
+# ---------------- Header (centered) ----------------
+_HEADER_TEX = None
+_HEADER_W = 1260
+_HEADER_H = 100
 
-                with dpg.group(horizontal=True):
-                    dpg.add_button(tag="scan_btn", label="Scan", callback=cb_scan)
-                    dpg.add_progress_bar(tag="scan_progress", default_value=0.0, width=300)
+def _recenter_header():
+    """Center header image/group by adjusting indent based on viewport width."""
+    try:
+        vpw = dpg.get_viewport_width()
+    except Exception:
+        return
+    indent = max(0, int((vpw - _HEADER_W) / 2))
+    if dpg.does_item_exist("header_wrap"):
+        dpg.configure_item("header_wrap", indent=indent)
 
-                dpg.add_spacer(height=6)
-                dpg.add_text("Found items:")
+def _build_header(parent):
+    header_wrap = dpg.add_group(tag="header_wrap", parent=parent, indent=0)
+    if _HEADER_TEX:
+        dpg.add_image(_HEADER_TEX, parent=header_wrap)
+    else:
+        dl = dpg.add_drawlist(parent=header_wrap, width=_HEADER_W, height=90)
+        dpg.draw_rectangle((0, 0), (_HEADER_W, 90),
+                           fill=(30, 30, 35, 255), color=(0, 0, 0, 0), parent=dl)
+        dpg.draw_text((16, 14), "ProjectCreator", size=28, color=(230, 230, 240, 255), parent=dl)
+        dpg.draw_text((18, 48), "by Ales Ushakou", size=16, color=(160, 160, 170, 255), parent=dl)
+        dpg.draw_text((290, 18), "v1.10", size=18, color=(200, 200, 210, 255), parent=dl)
 
-                with dpg.table(tag="found_table",
-                               borders_innerH=True, borders_innerV=True,
-                               borders_outerH=True, borders_outerV=True,
-                               resizable=True, policy=dpg.mvTable_SizingStretchProp,
-                               scrollY=True, height=340):
-                    dpg.add_table_column(label="Type", width_fixed=True, init_width_or_weight=80)
-                    dpg.add_table_column(label="Name", width_stretch=True)
-                    dpg.add_table_column(label="Source path", width_stretch=True)
-                    dpg.add_table_column(label="Actions", width_fixed=True, init_width_or_weight=100)
+# ---------------- Tabs ----------------
+def _build_project_params_tab(parent):
+    root = dpg.add_group(parent=parent)
+    _build_header(root)
+    dpg.add_spacer(height=8, parent=root)
 
-                dpg.add_spacer(height=8)
+    row_src = dpg.add_group(parent=root, horizontal=True)
+    dpg.add_text("Source folder:", parent=row_src)
+    dpg.add_input_text(tag="source_input", width=520, parent=row_src)
+    dpg.add_button(label="Browse", callback=lambda: dpg.show_item("dlg_source"), parent=row_src)
 
-                with dpg.group(horizontal=True):
-                    dpg.add_button(tag="create_btn", label="Create Project", callback=cb_create, width=160)
-                    dpg.add_progress_bar(tag="create_progress", default_value=0.0, width=300)
+    dpg.add_spacer(height=6, parent=root)
+    row_dst = dpg.add_group(parent=root, horizontal=True)
+    dpg.add_text("Destination:", parent=row_dst)
+    dpg.add_input_text(tag="dest_input", width=520, parent=row_dst)
+    dpg.add_button(label="Browse", callback=lambda: dpg.show_item("dlg_dest"), parent=row_dst)
 
-                with dpg.group(horizontal=True):
-                    dpg.add_checkbox(tag="overwrite_chk", label="Overwrite if exists", default_value=False)
-                    dpg.add_checkbox(tag="opt_plate", label="Create 'plate' folder", default_value=False)
-                    dpg.add_checkbox(tag="opt_camera", label="Create 'camera' folder", default_value=False)
+    dpg.add_spacer(height=8, parent=root)
+    row_scan = dpg.add_group(parent=root, horizontal=True)
+    dpg.add_button(label="Scan", width=120, callback=_cb_scan, parent=row_scan)
+    dpg.add_progress_bar(tag="scan_progress", width=400, parent=row_scan)
 
-                dpg.add_spacer(height=8)
-                dpg.add_text("Log:")
-                with dpg.child_window(tag="log_region", autosize_x=True, height=200, border=True):
-                    pass
+    dpg.add_spacer(height=6, parent=root)
+    dpg.add_text("Found items:", parent=root)
+    # фиксируем высоту, чтобы не прыгало при ресайзе окна
+    dpg.add_child_window(tag="found_table_region",
+                         autosize_x=True, autosize_y=False,
+                         height=260, border=True, parent=root)
+    _ensure_found_table()
 
-            with dpg.tab(label="Nuke Script parameters"):
-                try:
-                    import importlib
-                    mod = importlib.import_module("nuke_params")
-                    if hasattr(mod, "build_ui"):
-                        mod.build_ui(parent_tag=dpg.last_container())
-                    else:
-                        dpg.add_text("[WARN] nuke_params.py найден, но нет функции build_ui(parent_tag=...)")
-                except ModuleNotFoundError:
-                    with dpg.group():
-                        dpg.add_text("Nuke preset:")
-                        dpg.add_input_text(tag="nuke_preset_combo", width=360, callback=lambda *a, **k: None)
-                        dpg.add_text("Color:")
-                        dpg.add_combo(items=["Nuke", "ACES"], tag="nuke_color_combo", width=140)
-                        dpg.add_text("ColorSpace:")
-                        dpg.add_combo(items=["linear"], tag="nuke_colorspace_combo", width=320)
-                        dpg.add_text("[WARN] nuke_params.py не найден рядом со скриптом.")
-                except Exception as e:
-                    dpg.add_text(f"[ERROR] Ошибка при загрузке nuke_params.py: {e}")
-                    _log_early(f"nuke_params import error: {e}\n{traceback.format_exc()}")
+    dpg.add_spacer(height=6, parent=root)
+    row_create = dpg.add_group(parent=root, horizontal=True)
+    dpg.add_button(label="Create Project", width=140, callback=_cb_create, parent=row_create)
+    dpg.add_progress_bar(tag="create_progress", width=400, parent=row_create)
 
-    with dpg.file_dialog(directory_selector=True, show=False,
-                         callback=cb_pick_src, tag="file_dialog_src",
-                         width=700, height=400):
-        dpg.add_file_extension("")
-    with dpg.file_dialog(directory_selector=True, show=False,
-                         callback=cb_pick_dst, tag="file_dialog_dst",
-                         width=700, height=400):
-        dpg.add_file_extension("")
+    dpg.add_spacer(height=6, parent=root)
+    row_opts = dpg.add_group(parent=root, horizontal=True)
+    dpg.add_text("Overwrite if exists:", parent=row_opts)
+    dpg.add_combo(OVERWRITE_CHOICES, default_value="None", tag="overwrite_mode", width=160, parent=row_opts)
 
+    dpg.add_spacer(height=10, parent=root)
+    dpg.add_text("Log:", parent=root)
+    dpg.add_child_window(tag="log_console", autosize_x=True, height=220, border=True, parent=root)
+
+def _build_nuke_params_tab(parent):
+    container = dpg.add_group(parent=parent)
+    try:
+        mod = importlib.import_module("nuke_params")
+        if hasattr(mod, "build_ui"):
+            mod.build_ui(parent_tag=container)
+        else:
+            dpg.add_text("[WARN] nuke_params.py found, but build_ui() is missing.", parent=container)
+    except ModuleNotFoundError:
+        dpg.add_text("[WARN] nuke_params.py not found next to the script.", parent=container)
+    except Exception as e:
+        dpg.add_text(f"[ERROR] Failed to load nuke_params.py: {e}", parent=container)
+        log(traceback.format_exc())
+
+def _build_utility_tab(parent):
+    container = dpg.add_group(parent=parent)
+    try:
+        util_mod = importlib.import_module("PCUtility")
+        if hasattr(util_mod, "build_ui"):
+            util_mod.build_ui(parent_tag=container)
+        else:
+            dpg.add_text("[WARN] PCUtility.py found, but build_ui() is missing.", parent=container)
+    except ModuleNotFoundError:
+        dpg.add_text("[WARN] PCUtility.py not found next to the script.", parent=container)
+    except Exception as e:
+        dpg.add_text(f"[ERROR] Failed to load PCUtility.py: {e}", parent=container)
+        log(traceback.format_exc())
+
+# ---------------- Main ----------------
+def build_ui():
+    global _HEADER_TEX, _HEADER_W, _HEADER_H
+    # load header image if exists
+    if HEADER_IMAGE_PATH.exists():
+        w, h, ch, data = dpg.load_image(str(HEADER_IMAGE_PATH))
+        dpg.add_texture_registry(tag="pc_texreg")
+        _HEADER_TEX = dpg.add_static_texture(w, h, data, parent="pc_texreg")
+        _HEADER_W, _HEADER_H = w, h
+
+    # dialogs
+    dpg.add_file_dialog(directory_selector=True, show=False, callback=_cb_pick_source, tag="dlg_source")
+    dpg.add_file_dialog(directory_selector=True, show=False, callback=_cb_pick_dest, tag="dlg_dest")
+
+    # main window + tabs
+    main_window = dpg.add_window(label=APP_TITLE, tag="main_window", width=1280, height=860)
+    tab_bar = dpg.add_tab_bar(parent=main_window)
+
+    tab_project = dpg.add_tab(label="Project Parameters", parent=tab_bar)
+    _build_project_params_tab(tab_project)
+
+    tab_nuke = dpg.add_tab(label="Nuke Script parameters", parent=tab_bar)
+    _build_nuke_params_tab(tab_nuke)
+
+    tab_util = dpg.add_tab(label="Utility", parent=tab_bar)
+    _build_utility_tab(tab_util)
+
+def main():
+    dpg.create_context()
+    build_ui()
+    dpg.create_viewport(title=APP_TITLE, width=1280, height=880)
     dpg.setup_dearpygui()
     dpg.show_viewport()
+
+    # Center header on show and on resize
+    _recenter_header()
+    try:
+        dpg.set_viewport_resize_callback(lambda s, a: _recenter_header())
+    except Exception:
+        pass
+
     dpg.set_primary_window("main_window", True)
     dpg.start_dearpygui()
     dpg.destroy_context()
-
-def main():
-    try:
-        PRESETS_DIR.mkdir(parents=True, exist_ok=True)
-        build_ui()
-    except Exception as e:
-        txt = f"\n=== Fatal error on startup (v1.01) ===\n{e}\n{traceback.format_exc()}"
-        _log_early(txt)
-        print(txt, file=sys.stderr, flush=True)
 
 if __name__ == "__main__":
     main()

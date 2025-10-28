@@ -7,71 +7,22 @@ import re
 import subprocess
 import shutil
 import sys
+from typing import Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 VIDEO_EXTS = {".mov", ".mp4", ".mxf"}
 SEQ_EXTS   = {".exr", ".dpx", ".tiff", ".tif", ".png", ".jpg", ".jpeg"}
 
-DEFAULT_TEMPLATE = """Root {
-    fps 25
-    colorManagement Nuke
-}
-Read {
- name Read_source
-}
-Write {
- name Write_comp
-}
-Write {
- name Write_preview
-}
-"""
-
-# ---------- utils ----------
+# ------------------- utils -------------------
 def _posix(s: str) -> str:
     return s.replace("\\", "/")
 
-def _safe_int(s, default=None):
+def _safe_int(x, default=None):
     try:
-        return int(s)
+        return int(x)
     except Exception:
         return default
-
-def detect_sequence_info(seq_dir: Path):
-    frames = [p for p in seq_dir.iterdir() if p.is_file() and p.suffix.lower() in SEQ_EXTS]
-    if not frames:
-        return None
-    frames.sort()
-    nums = []
-    base = None
-    pad = None
-    ext = None
-    for f in frames:
-        m = re.match(r"^(.*?)(\d+)(\.[^.]+)$", f.name)
-        if not m:
-            continue
-        b, d, e = m.groups()
-        n = _safe_int(d)
-        if n is None:
-            continue
-        nums.append(n)
-        if base is None:
-            base, pad, ext = b, len(d), e
-    if not nums or base is None:
-        return None
-    first_frame = min(nums)
-    last_frame  = max(nums)
-    printf_pattern = f"{base}%07d{ext}"
-    return {
-        "base": base,
-        "pad": pad,
-        "ext": ext,
-        "printf_pattern": printf_pattern,
-        "first_frame": first_frame,
-        "last_frame": last_frame,
-        "count": len(nums),
-    }
 
 def _find_ffprobe():
     local = SCRIPT_DIR / "ffmpeg" / ("ffprobe.exe" if sys.platform.startswith("win") else "ffprobe")
@@ -79,7 +30,8 @@ def _find_ffprobe():
         return str(local)
     return shutil.which("ffprobe")
 
-def video_frame_count_ffprobe(video_path: Path) -> int | None:
+def video_frame_count_ffprobe(video_path: Path) -> Optional[int]:
+    """Пытаемся получить количество кадров для видео (не критично, если не получится)."""
     ffprobe_bin = _find_ffprobe()
     if not ffprobe_bin:
         return None
@@ -93,9 +45,9 @@ def video_frame_count_ffprobe(video_path: Path) -> int | None:
     ]
     for cmd in cmds:
         try:
-            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, universal_newlines=True, timeout=10)
+            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, universal_newlines=True, timeout=8)
             lines = [l.strip() for l in (out or "").splitlines() if l.strip()]
-            if not lines: 
+            if not lines:
                 continue
             if len(lines) == 1:
                 val = _safe_int(lines[0])
@@ -106,7 +58,7 @@ def video_frame_count_ffprobe(video_path: Path) -> int | None:
                     duration = float(lines[0]); num, den = lines[1].split("/")
                     fps = float(num) / float(den) if den != "0" else 0.0
                     frames = int(round(duration * fps))
-                    if frames > 0: 
+                    if frames > 0:
                         return frames
                 except Exception:
                     pass
@@ -114,244 +66,345 @@ def video_frame_count_ffprobe(video_path: Path) -> int | None:
             pass
     return None
 
-# ---------- helpers for blocks ----------
-def _replace_param_in_block(block: str, key: str, value: str) -> str:
-    pattern = rf"(?m)^\s*{re.escape(key)}\s+.*$"
-    repl = f"{key} {value}"
-    if re.search(pattern, block):
-        return re.sub(pattern, repl, block)
-    else:
-        return re.sub(r"\n\}", f"\n    {repl}\n}}", block, count=1)
+def detect_sequence_info(seq_dir: Path):
+    """Определяем паддинг и диапазон кадров по именам файлов."""
+    files = [p for p in seq_dir.iterdir() if p.is_file() and p.suffix.lower() in SEQ_EXTS and not p.name.startswith(".")]
+    if not files:
+        return None
+    files.sort()
+    nums = []
+    pad = None
+    base = None
+    ext  = None
+    for f in files:
+        m = re.match(r"^(.*?)(\d+)(\.[^.]+)$", f.name)
+        if not m:
+            continue
+        b, d, e = m.groups()
+        n = _safe_int(d)
+        if n is None:
+            continue
+        nums.append(n)
+        if pad is None:
+            base, pad, ext = b, len(d), e
+    if not nums or pad is None:
+        return None
+    return {
+        "base": base,
+        "pad":  pad,
+        "ext":  ext,
+        "min":  min(nums),
+        "max":  max(nums),
+    }
 
+# --------------- block helpers ---------------
 def _strip_lines(block: str, keys):
     pat = r"(?m)^\s*(?:%s)\b.*\r?\n" % "|".join(re.escape(k) for k in keys)
     return re.sub(pat, "", block)
 
-def _find_root_block(nk: str):
-    i = nk.find("Root")
-    while i != -1:
-        j = nk.find("{", i)
-        if j == -1: return None
-        if "\n" not in nk[i:j] and "\r" not in nk[i:j]: break
-        i = nk.find("Root", i + 4)
-    if i == -1: return None
-    depth = 0; k = j; n = len(nk)
-    while k < n:
-        ch = nk[k]
-        if ch == "{": depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0: return (i, k + 1, nk[i:k+1])
-        k += 1
-    return None
+def _replace_line(block: str, key: str, value_line: str) -> str:
+    """Заменить строку 'key ...' или вставить перед '}'."""
+    pat = rf"(?m)^\s*{re.escape(key)}\b.*$"
+    if re.search(pat, block):
+        return re.sub(pat, value_line, block)
+    return re.sub(r"\n\}", f"\n{value_line}\n}}", block, count=1)
 
-def _iter_write_blocks(nk: str):
-    i = 0; n = len(nk)
-    while True:
-        i = nk.find("Write", i)
-        if i == -1: return
+def _insert_after_open(block: str, nodename: str, lines: list[str]) -> str:
+    """Вставить строки сразу после строки с '{' узла."""
+    pos_node = block.find(nodename)
+    brace = block.find("{", pos_node if pos_node >= 0 else 0)
+    if brace == -1:
+        return block
+    nl = block.find("\n", brace)
+    ins = (brace + 1) if nl == -1 else (nl + 1)
+    payload = "".join(line + "\n" for line in lines)
+    return block[:ins] + payload + block[ins:]
+
+def _iter_node_blocks(nk: str, node_type: str):
+    """Итератор по блокам указанного типа (Read/Write/Root)."""
+    i, n = 0, len(nk)
+    while i < n:
+        i = nk.find(node_type, i)
+        if i == -1:
+            return
+        # проверяем, что это именно имя узла
         j = nk.find("{", i)
-        if j == -1: return
-        if "\n" in nk[i:j] or "\r" in nk[i:j]: i += 5; continue
-        depth = 0; k = j
+        if j == -1:
+            return
+        depth = 0
+        k = j
         while k < n:
-            ch = nk[k]
-            if ch == "{": depth += 1
-            elif ch == "}":
+            if nk[k] == "{":
+                depth += 1
+            elif nk[k] == "}":
                 depth -= 1
                 if depth == 0:
                     yield i, k + 1, nk[i:k+1]
-                    i = k + 1; break
+                    i = k + 1
+                    break
             k += 1
-        else:
-            return
 
-def _find_read_source_block(nk: str):
-    for m in re.finditer(r"(?s)\bRead\s*\{.*?\}", nk):
-        block = m.group(0)
-        if re.search(r"(?m)^\s*name\s+Read_source\b", block):
-            return (m.start(), m.end(), block)
+def _find_root(nk: str):
+    for start, end, block in _iter_node_blocks(nk, "Root"):
+        return start, end, block
     return None
 
-def _insert_after_write_open(block: str, lines_to_insert: list[str]) -> str:
-    brace_pos = block.find("{", block.find("Write"))
-    if brace_pos == -1: return block
-    nl_pos = block.find("\n", brace_pos)
-    insert_pos = (brace_pos + 1) if nl_pos == -1 else (nl_pos + 1)
-    insertion = "".join(f"{line}\n" for line in lines_to_insert)
-    return block[:insert_pos] + insertion + block[insert_pos:]
+def _find_read_source(nk: str):
+    for start, end, block in _iter_node_blocks(nk, "Read"):
+        if re.search(r"(?m)^\s*name\s+Read_source\b", block):
+            return start, end, block
+    # если нет — возьмём первый Read и переименуем
+    for start, end, block in _iter_node_blocks(nk, "Read"):
+        return start, end, block
+    return None
 
-def _insert_before_name_read_source(block: str, lines_to_insert: list[str]) -> str:
-    clean = _strip_lines(block, ["frame_mode", "frame"])
-    m = re.search(r"(?m)^\s*name\s+Read_source\b.*$", clean)
-    if not m: return clean
-    insertion = "".join(f"{line}\n" for line in lines_to_insert)
-    return clean[:m.start()] + insertion + clean[m.start():]
+def _ensure_node_name(block: str, desired: str) -> str:
+    if re.search(r"(?m)^\s*name\s+\S+", block):
+        return re.sub(r"(?m)^\s*name\s+\S+", f" name {desired}", block, count=1)
+    # если вовсе нет name — добавим в конец
+    return re.sub(r"\n\}", f"\n name {desired}\n}}", block, count=1)
 
-# ---------- Root insert (1-space indent) ----------
-def _set_root_first_last_fps(nk: str, root_first: int, root_last: int, fps_value: str, log=print) -> str:
-    found = _find_root_block(nk)
-    insertion = f" first_frame {root_first}\n last_frame {root_last}\n fps {fps_value}\n"
+# --------------- Root ops ---------------
+def _set_root_name(nk: str, new_name: str, log=print) -> str:
+    found = _find_root(nk)
     if not found:
-        log("[NK] Root block not found — creating new Root at top")
-        return f"Root {{\n{insertion}}}\n\n" + nk
-    start, end, root_block = found
-    root_clean = _strip_lines(root_block, ["first_frame", "last_frame", "fps"])
-    proj_m = re.search(r"(?m)^\s*project_directory\b.*\r?\n", root_clean)
-    if proj_m:
-        new_root = root_clean[:proj_m.end()] + insertion + root_clean[proj_m.end():]
+        log("[NK] Root not found; creating new Root with name.")
+        return f"Root {{\n name {new_name}\n}}\n\n" + nk
+    s, e, block = found
+    if re.search(r"(?m)^\s*name\s+\S+", block):
+        block2 = re.sub(r"(?m)^\s*name\s+\S+", f" name {new_name}", block, count=1)
+    else:
+        block2 = _insert_after_open(block, "Root", [f" name {new_name}"])
+    log(f"[NK] Root name -> {new_name}")
+    return nk[:s] + block2 + nk[e:]
+
+def _set_root_first_last_fps(nk: str, first_frame: int, last_frame: int, fps: int, log=print) -> str:
+    found = _find_root(nk)
+    insertion = [
+        f" first_frame {first_frame}",
+        f" last_frame {last_frame}",
+        f" fps {fps}",
+    ]
+    if not found:
+        log("[NK] Root not found; creating new Root with fps/range.")
+        return "Root {\n" + "\n".join(insertion) + "\n}\n\n" + nk
+    s, e, block = found
+    block = _strip_lines(block, ["first_frame", "last_frame", "fps"])
+    # если есть project_directory — вставим после него; иначе — перед }
+    proj = re.search(r"(?m)^\s*project_directory\b.*$", block)
+    if proj:
+        pos = proj.end()
+        block2 = block[:pos] + "\n" + "\n".join(insertion) + block[pos:]
         where = "after project_directory"
     else:
-        new_root = re.sub(r"\n\}", f"\n{insertion}}}", root_clean, count=1)
+        block2 = re.sub(r"\n\}", "\n" + "\n".join(insertion) + "\n}", block, count=1)
         where = "before }"
-    log(f"[NK] Root updated ({where}) -> first_frame={root_first}, last_frame={root_last}, fps={fps_value}")
-    return nk[:start] + new_root + nk[end:]
+    log(f"[NK] Root range/fps set ({where}): ff={first_frame}, lf={last_frame}, fps={fps}")
+    return nk[:s] + block2 + nk[e:]
 
-# ---------- main builder ----------
-def build_nuke_from_preset(template_text: str,
-                           cfg: dict,
-                           project_name: str,
-                           item: dict,
-                           log=print) -> str:
-    nk = template_text
+def _insert_on_script_load(nk: str, log=print) -> str:
+    """Одна строка без [] перед закрывающей } в Root."""
+    line = (
+        " onScriptLoad \"import nuke; n=nuke.toNode('Read_source'); "
+        "w=int(n.metadata('input/width') or n.width()) if n else 0; "
+        "h=int(n.metadata('input/height') or n.height()) if n else 0; "
+        "fn=f'PC_auto_{w}x{h}'; nuke.addFormat(f'{w} {h} {fn}'); nuke.root()['format'].setValue(fn)\"\n"
+    )
+    found = _find_root(nk)
+    if not found:
+        log("[NK] Root not found; creating with onScriptLoad.")
+        return "Root {\n" + line + "}\n\n" + nk
+    s, e, block = found
+    if "onScriptLoad" in block:
+        log("[NK] onScriptLoad already exists; skip.")
+        return nk
+    block2 = re.sub(r"\n\}\s*$", f"\n{line}}}", block, count=1)
+    log("[NK] onScriptLoad inserted.")
+    return nk[:s] + block2 + nk[e:]
 
-    # --- Read_source ---
-    in_basename = None
-    seq_info = None
-    video_frames = None
+# --------------- Read / Write ops ---------------
+def _patch_read_source(nk: str, item: dict, first_frame: int, colorspace: str, log=print) -> tuple[str, int, int, str]:
+    """
+    Возвращает (nk_text, src_first, src_last, in_basename).
+    src_first/src_last - диапазон исходного медиа (для рассчёта Root/Write).
+    """
+    found = _find_read_source(nk)
+    if not found:
+        log("[NK] Read node not found; cannot patch Read.")
+        return nk, first_frame, first_frame, "input"
+    s, e, block = found
+    block = _ensure_node_name(block, "Read_source")
 
-    found_read = _find_read_source_block(nk)
-    if found_read:
-        r_start, r_end, read_block = found_read
-        ff_ui = int(cfg.get("first_frame", 1))
-        read_block = _insert_before_name_read_source(
-            read_block, [f" frame_mode \"start at\"", f" frame {ff_ui}"]
-        )
-        if item["type"] == "video":
-            in_basename = item['src'].stem
-            rel_in = f"../in/{item['src'].name}"
-            read_block = _replace_param_in_block(read_block, "file", f"\"{_posix(rel_in)}\"")
-            video_frames = video_frame_count_ffprobe(item['src'])
-            if video_frames:
-                read_block = _replace_param_in_block(read_block, "first", "1")
-                read_block = _replace_param_in_block(read_block, "last", str(video_frames))
-            read_block = _replace_param_in_block(read_block, "colorspace", cfg["colorspace"])
-            log(f"[NK] Read_source(video) -> file={rel_in}, frame_mode=start at, frame={ff_ui}, colorspace={cfg['colorspace']}, frames={video_frames or 'n/a'}")
+    if item["type"] == "video":
+        in_file = Path(item["src"])
+        in_basename = in_file.stem
+        rel = f"../in/{in_file.name}"
+        block = _replace_line(block, "file", f' file "{_posix(rel)}"')
+        # видео: попробуем узнать длину, иначе ff..ff
+        frames = video_frame_count_ffprobe(in_file)
+        src_first, src_last = 1, (frames or 1)
+        # цветов. пространство и стартовый кадр в Read не трогаем frame_rate (его нет)
+        block = _replace_line(block, "colorspace", f' colorspace "{colorspace}"')
+        # для секвенций мы добавляли frame_mode/frame — для видео можно пропустить, но вы просили всегда:
+        block = _strip_lines(block, ["frame_mode", "frame"])
+        block = re.sub(r"(?m)^\s*name\s+Read_source\b.*$",
+                       f' frame_mode "start at"\n frame {first_frame}\n name Read_source',
+                       block)
+        log(f"[NK] Read_source(video): file={rel}, frames={frames or 'n/a'}, colorspace={colorspace}")
+    else:
+        seq_dir = Path(item["src"])
+        in_basename = seq_dir.name
+        info = detect_sequence_info(seq_dir)
+        if info:
+            # Read: строго %0Nd (а не #)
+            pattern = f"{info['base']}%0{info['pad']}d{info['ext']}"
+            rel = f"../in/{seq_dir.name}/{pattern}"
+            block = _replace_line(block, "file", f' file "{_posix(rel)}"')
+            block = _replace_line(block, "first", f" first {info['min']}")
+            block = _replace_line(block, "last",  f" last {info['max']}")
+            block = _replace_line(block, "colorspace", f' colorspace "{colorspace}"')
+            block = _strip_lines(block, ["frame_mode", "frame"])
+            block = re.sub(r"(?m)^\s*name\s+Read_source\b.*$",
+                           f' frame_mode "start at"\n frame {first_frame}\n name Read_source',
+                           block)
+            src_first, src_last = info["min"], info["max"]
+            log(f"[NK] Read_source(seq): file={rel}, first={info['min']}, last={info['max']}, colorspace={colorspace}")
         else:
-            seq_dir = item["src"]
-            in_basename = seq_dir.name
-            seq_info = detect_sequence_info(seq_dir)
-            if seq_info:
-                rel_in = f"../in/{seq_dir.name}/{seq_info['printf_pattern']}"
-                read_block = _replace_param_in_block(read_block, "file", f"\"{_posix(rel_in)}\"")
-                read_block = _replace_param_in_block(read_block, "first", str(seq_info['first_frame']))
-                read_block = _replace_param_in_block(read_block, "last",  str(seq_info['last_frame']))
-                read_block = _replace_param_in_block(read_block, "colorspace", cfg["colorspace"])
-                log(f"[NK] Read_source(seq) -> file={rel_in}, frame_mode=start at, frame={ff_ui}, first={seq_info['first_frame']}, last={seq_info['last_frame']}, colorspace={cfg['colorspace']}")
-            else:
-                files = sorted([p for p in seq_dir.iterdir() if p.is_file()])
-                first_name = files[0].name if files else ""
-                rel_in = f"../in/{seq_dir.name}/{first_name}"
-                read_block = _replace_param_in_block(read_block, "file", f"\"{_posix(rel_in)}\"")
-                read_block = _replace_param_in_block(read_block, "colorspace", cfg["colorspace"])
-                log(f"[NK] Read_source(seq-fallback) -> file={rel_in}, frame_mode=start at, frame={ff_ui}, colorspace={cfg['colorspace']}")
-        nk = nk[:r_start] + read_block + nk[r_end:]
-    else:
-        log("[WARN] Node Read_source not found — using project name as base")
-        in_basename = project_name
+            # fallback: первый файл
+            files = sorted([p for p in seq_dir.iterdir() if p.is_file() and not p.name.startswith(".")])
+            rel = f"../in/{seq_dir.name}/{files[0].name}" if files else f"../in/{seq_dir.name}"
+            block = _replace_line(block, "file", f' file "{_posix(rel)}"')
+            block = _replace_line(block, "colorspace", f' colorspace "{colorspace}"')
+            block = _strip_lines(block, ["frame_mode", "frame"])
+            block = re.sub(r"(?m)^\s*name\s+Read_source\b.*$",
+                           f' frame_mode "start at"\n frame {first_frame}\n name Read_source',
+                           block)
+            src_first, src_last = first_frame, first_frame
+            log(f"[NK] Read_source(fallback): file={rel}, colorspace={colorspace}")
 
-    # --- Root (first/last/fps) ---
-    ff = int(cfg.get("first_frame", 1))
-    if seq_info:
-        read_last = seq_info['last_frame']
-    elif video_frames:
-        read_last = video_frames
-    else:
-        read_last = ff
-    root_first = ff
-    root_last  = (ff + read_last) - 1 if read_last else ff
-    nk = _set_root_first_last_fps(nk, root_first, root_last, str(cfg.get("fps", "25")), log=log)
+    nk = nk[:s] + block + nk[e:]
+    return nk, src_first, src_last, in_basename
 
-    # --- Write nodes ---
-    out_chunks = []; last_idx = 0
-    for start, end, block in _iter_write_blocks(nk):
-        mname = re.search(r'\bname\s*"?([^\s"\}]+)"?', block)
-        node_name = mname.group(1) if mname else ""
+def _patch_write_blocks(nk: str, in_basename: str, first_frame: int, last_frame: int,
+                        colorspace: str, item: dict, log=print) -> str:
+    """Patch Write_preview and Write_comp blocks without deleting preset lines (codecs, etc.)."""
+    out = []; last = 0
+    for s, e, block in _iter_node_blocks(nk, "Write"):
+        name_m = re.search(r"(?m)^\s*name\s+([^\s\}]+)", block)
+        node_name = name_m.group(1) if name_m else ""
 
-        if node_name == "Write_preview":
+        if node_name in ("Write2", "Write_preview"):
+            # preview: только путь + first/last/use_limit/create_directories (+ file_type mov при необходимости)
             rel = f"../preview/{in_basename}_prew_v001.mov"
-            quoted = f"\"{_posix(rel)}\""
-            clean = _strip_lines(block, ["file", "colorspace", "first", "last", "use_limit"])
-            lines = [
-                f" file {quoted}",
-                f" colorspace {cfg['colorspace']}",
-                f" first {root_first}",
-                f" last {root_last}",
-                " use_limit true",
-            ]
-            new_block = _insert_after_write_open(clean, lines)
-            out_chunks.append(nk[last_idx:start]); out_chunks.append(new_block); last_idx = end
-            log(f"[NK] Write_preview -> file={rel}, colorspace={cfg['colorspace']}, first={root_first}, last={root_last}, use_limit=true")
+            b = block
+            # имя ноды
+            if node_name != "Write_preview":
+                b = re.sub(r"(?m)^\s*name\s+\S+", " name Write_preview", b, count=1)
 
-        elif node_name == "Write_comp":
-            # если секвенция — подпапка <имя>_comp_v001/<имя>_comp_v001.%07d<ext>
-            if seq_info:
-                rel = f"../out/{in_basename}_comp_v001/{in_basename}_comp_v001.%07d{seq_info['ext']}"
-                file_type = seq_info["ext"].lstrip(".").lower()
-                extra_codec_lines = []  # для секвенций не нужно
+            # обновляем/добавляем ключи
+            b = _replace_line(b, "file",        f' file "{_posix(rel)}"')
+            b = _replace_line(b, "first",       f" first {first_frame}")
+            b = _replace_line(b, "last",        f" last {last_frame}")
+            b = _replace_line(b, "use_limit",   " use_limit true")
+            b = _replace_line(b, "create_directories", " create_directories true")
+            # гарантируем тип файла (не трогаем кодеки, если они есть)
+            b = _replace_line(b, "file_type",   " file_type mov")
+
+            out.extend([nk[last:s], b]); last = e
+            log(f"[NK] Write_preview -> file={rel}; first/last/use_limit/create_directories set")
+
+        elif node_name in ("Write1", "Write_comp"):
+            b = block
+            # имя ноды
+            if node_name != "Write_comp":
+                b = re.sub(r"(?m)^\s*name\s+\S+", " name Write_comp", b, count=1)
+
+            if item["type"] == "sequence":
+                info = detect_sequence_info(Path(item["src"]))
+                pad = info["pad"] if info else 7
+                hashes = "#" * pad
+                ext = (info["ext"].lstrip(".") if info else "exr")
+                rel = f"../out/{in_basename}_comp_v001/{in_basename}_comp_v001.{hashes}.{ext}"
+
+                b = _replace_line(b, "file",        f' file "{_posix(rel)}"')
+                b = _replace_line(b, "file_type",   f" file_type {ext}")
+                b = _replace_line(b, "colorspace",  f' colorspace "{colorspace}"')
+                b = _replace_line(b, "first",       f" first {first_frame}")
+                b = _replace_line(b, "last",        f" last {last_frame}")
+                b = _replace_line(b, "use_limit",   " use_limit true")
+                b = _replace_line(b, "create_directories", " create_directories true")
+
+                out.extend([nk[last:s], b]); last = e
+                log(f"[NK] Write_comp(seq) -> file={rel}; file_type={ext}; colorspace={colorspace}; first/last/use_limit/create_directories set")
             else:
+                # video → mov; не трогаем codec-строки из пресета
                 rel = f"../out/{in_basename}_comp_v001.mov"
-                file_type = "mov"
-                # codec-параметры только для видео
-                extra_codec_lines = [
-                    f" mov64_codec appr",
-                    f" mov_prores_codec_profile \"ProRes 4:4:4:4 XQ 12-bit\"",
-                ]
 
-            quoted = f"\"{_posix(rel)}\""
-            clean = _strip_lines(block, [
-                "file", "file_type", "mov64_codec", "mov_prores_codec_profile",
-                "colorspace", "create_directories", "first", "last", "use_limit"
-            ])
+                b = _replace_line(b, "file",        f' file "{_posix(rel)}"')
+                b = _replace_line(b, "file_type",   " file_type mov")
+                b = _replace_line(b, "colorspace",  f' colorspace "{colorspace}"')
+                b = _replace_line(b, "first",       f" first {first_frame}")
+                b = _replace_line(b, "last",        f" last {last_frame}")
+                b = _replace_line(b, "use_limit",   " use_limit true")
+                b = _replace_line(b, "create_directories", " create_directories true")
 
-            lines = [
-                f" file {quoted}",
-                f" file_type {file_type}",
-                *extra_codec_lines,
-                f" colorspace {cfg['colorspace']}",
-                f" create_directories true",
-                f" first {root_first}",
-                f" last {root_last}",
-                " use_limit true",
-            ]
+                out.extend([nk[last:s], b]); last = e
+                log(f"[NK] Write_comp(video) -> file={rel}; colorspace={colorspace}; first/last/use_limit/create_directories set")
 
-            new_block = _insert_after_write_open(clean, lines)
-            out_chunks.append(nk[last_idx:start])
-            out_chunks.append(new_block)
-            last_idx = end
-
-            log(
-                f"[NK] Write_comp -> file={rel}, file_type={file_type}, "
-                f"colorspace={cfg['colorspace']}, create_directories=true, "
-                f"first={root_first}, last={root_last}, use_limit=true"
-            )
         else:
-            out_chunks.append(nk[last_idx:start]); out_chunks.append(block); last_idx = end
+            # любые другие Write оставляем как есть
+            pass
 
-    out_chunks.append(nk[last_idx:])
-    return "".join(out_chunks)
+    out.append(nk[last:])
+    return "".join(out)
 
-def generate_nk_text(cfg: dict,
-                     project_name: str,
-                     item: dict,
-                     preset_path: Path | None = None,
-                     log=print) -> str:
-    tmpl = None
-    if preset_path and Path(preset_path).exists():
-        try:
-            tmpl = Path(preset_path).read_text(encoding="utf-8", errors="ignore")
-        except Exception as e:
-            log(f"[WARN] Can't read preset {preset_path}: {e}")
-    if not tmpl:
-        tmpl = DEFAULT_TEMPLATE
-    return build_nuke_from_preset(tmpl, cfg, project_name, item, log=log)
+
+
+# --------------- Public API ---------------
+def generate_nk_text(cfg: dict, project_name: str, item: dict,
+                     preset_path: Optional[Path] = None, log=print) -> str:
+    """
+    Читает .nk пресет и правит нужные поля.
+    Если пресет не найден — выбрасывает FileNotFoundError.
+    """
+    # 1) загрузка пресета
+    preset = preset_path or (Path(cfg["preset"]) if cfg.get("preset") else None)
+    if not preset or not Path(preset).exists():
+        msg = f"[ERROR] Preset .nk file not found: {preset or '(not specified)'}"
+        log(msg)
+        raise FileNotFoundError(msg)
+
+    try:
+        nk = Path(preset).read_text(encoding="utf-8", errors="ignore")
+    except Exception as e:
+        msg = f"[ERROR] Failed to read preset {preset}: {e}"
+        log(msg)
+        raise
+
+    if not nk.strip():
+        msg = f"[ERROR] Preset {preset} is empty or unreadable."
+        log(msg)
+        raise ValueError(msg)
+
+    # 2) значения
+    colorspace  = cfg.get("colorspace") or "scene_linear"
+    fps         = _safe_int(cfg.get("fps"), 25) or 25
+    first_frame = _safe_int(cfg.get("first_frame"), 1001) or 1001
+
+    # 3) Read_source (получим src диапазон и базовое имя)
+    nk, src_first, src_last, in_basename = _patch_read_source(nk, item, first_frame, colorspace, log=log)
+
+    # 4) Root: имя, диапазоны/ fps
+    proj_first = first_frame
+    proj_last  = proj_first + (src_last - src_first)
+    nk = _set_root_name(nk, project_name, log=log)
+    nk = _set_root_first_last_fps(nk, proj_first, proj_last, fps, log=log)
+
+    # 5) Write_preview & Write_comp
+    nk = _patch_write_blocks(nk, in_basename, proj_first, proj_last, colorspace, item, log=log)
+
+    # 6) onScriptLoad — без квадратных скобок
+    nk = _insert_on_script_load(nk, log=log)
+
+    return nk
+

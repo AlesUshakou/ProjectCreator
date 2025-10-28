@@ -1,36 +1,33 @@
-
-# 🎬 ProjectCreator v1.01
-![Header Screenshot](ProjectCreator_header.png)
+# 🎬 ProjectCreator v1.10
+![Header Screenshot](src/ProjectCreator_header.png)
 _Automated project folder and Nuke script creator — by Aleš Ushakou (2025)_
 
-
+---
 
 ## 🧩 Overview
 
 **ProjectCreator** is a Python-based GUI tool designed to streamline the setup of new compositing projects in **Nuke**.  
 It automatically scans your footage or image sequences, creates organized folder structures, and generates `.nk` scripts with correct paths, color settings, and FPS — all configurable through a simple interface.
-This tool was created to help **freelancers** and **small studios** organize their compositing workflow efficiently.
+
+This project was created to help **freelancers** and **small studios** organize their compositing workflow efficiently and spend less time on repetitive setup tasks.
 
 ---
 
 ## 🖥️ Interface Preview
 
 ### 🧱 Project Parameters
-![Project Parameters](scr01.png)
+![Project Parameters](src/scr01.png)
 
 - Select **source** and **destination** folders  
 - Automatically detect `.mov`, `.mp4`, `.mxf`, or image sequences (`.exr`, `.dpx`, `.tiff`)  
 - Displays detected items with “Remove” actions  
 - Progress bars for *Scan* and *Create Project*  
-- Checkboxes:
-  - **Overwrite if exists**
-  - **Create 'plate' folder**
-  - **Create 'camera' folder**
+- Overwrite options: **None**, **All**, **Source**, **Nuke Script**
 
 ---
 
 ### 🎨 Nuke Script Parameters
-![Nuke Script Parameters](scr02.png)
+![Nuke Script Parameters](src/scr02.png)
 
 - Choose a **Nuke preset (.nk)** from the `/presets/` directory  
 - Select:
@@ -38,7 +35,18 @@ This tool was created to help **freelancers** and **small studios** organize the
   - **ColorSpace** — loaded from `ProjectCreator.ini`  
   - **First frame** and **FPS**
 
-All settings are stored in `ProjectCreator.ini` and reused across sessions.
+All parameters are saved automatically in `ProjectCreator.ini`.
+
+---
+
+### 🧰 Utility Tab
+![Utility Tab](src/scr03.png)
+
+#### 🔤 Bulk Rename
+- Select a folder and perform **batch renaming** of files  
+- Use comma-separated search patterns (e.g., `_v001,WIP,raw`)  
+- Optionally include subfolders  
+- Replace or remove parts of filenames instantly  
 
 ---
 
@@ -50,11 +58,11 @@ When creating a new project, the tool builds a clean and consistent structure:
 project/
 │
 ├─ Arc_10/
-│   ├─ in/          → original .mov or .exr sequence
-│   ├─ out/         → final renders
-│   ├─ preview/     → pre-render outputs
+│   ├─ in/          → source .mov or .exr sequence
+│   ├─ out/         → renders
+│   ├─ preview/     → preview outputs
 │   ├─ comp/        → .nk project files
-│   │   └─ Arc_10_comp_v001.nk
+│       └─ Arc_10_comp_v001.nk
 │
 └─ TRN2_0210/
     ├─ in/
@@ -67,7 +75,7 @@ project/
 
 ## ⚙️ Configuration: `ProjectCreator.ini`
 
-Automatically generated on first launch.
+Automatically created at first launch.
 
 ```ini
 [nuke]
@@ -101,7 +109,7 @@ rec709
 "Output - Rec.709"
 ```
 
-You can edit this file manually to customize color options or add new presets.
+You can edit this file manually to customize color models, FPS, or default values.
 
 ---
 
@@ -109,37 +117,37 @@ You can edit this file manually to customize color options or add new presets.
 
 | File | Description |
 |------|--------------|
-| **ProjectCreator.py** | Main GUI app (DearPyGUI) for scanning and project creation. |
-| **nuke_params.py** | Handles Nuke color settings, FPS, and user presets. |
-| **create_nk.py** | Builds `.nk` scripts from templates and applies user parameters. |
+| **ProjectCreator.py** | Main GUI app — scanning, folder creation, and Nuke integration |
+| **nuke_params.py** | Manages Nuke color model, FPS, and preset selection |
+| **create_nk.py** | Modifies `.nk` presets with correct paths and frame settings |
+| **PCUtility.py** | Handles utility tools (e.g., Bulk Rename) |
 
 ---
 
 ## 🪄 Features
 
-✅ Simple drag-and-drop style interface  
-✅ Reads video or sequence formats automatically  
-✅ Creates clean project structure (`in`, `out`, `preview`, `comp`)  
-✅ Generates `.nk` scripts using your presets  
-✅ Saves and recalls parameters via `ProjectCreator.ini`  
-✅ Built-in progress indicators and item removal  
-✅ Designed with a cinematic dark UI style  
+✅ Automatic detection of video & image sequences  
+✅ Organized folder creation (`in`, `out`, `preview`, `comp`)  
+✅ Uses `.nk` templates with injected parameters  
+✅ Saves preferences in `ProjectCreator.ini`  
+✅ Dual progress bars for *Scan* and *Create Project*  
+✅ Built-in bulk rename utility  
+✅ Clean dark interface built with **Dear PyGui**  
 
 ---
 
 ## 🧰 Requirements
 
 - **Python 3.9+**
-- **Dear PyGui**  
-- Other dependencies listed in `requirements.txt`
+- **Dear PyGui**
 
-Install them with:
+Install all dependencies via:
 ```bash
 pip install -r requirements.txt
 ```
 
-> For video files, **ffprobe.exe** (from FFmpeg) is required to detect frame count.  
-> If not in PATH, download FFmpeg from [ffmpeg.org](https://ffmpeg.org) or [Gyan Builds](https://www.gyan.dev/ffmpeg/builds/)  
+> For video duration and frame count detection, **ffprobe.exe** (from FFmpeg) is required.  
+> If not in PATH, download from [ffmpeg.org](https://ffmpeg.org) or [Gyan Builds](https://www.gyan.dev/ffmpeg/builds/)  
 > and place `ffprobe.exe` inside a local `ffmpeg/` folder next to `ProjectCreator.py`.
 
 ---
@@ -151,21 +159,19 @@ Run directly:
 python ProjectCreator.py
 ```
 
-Or use a `.bat` launcher.
+Or use a `ProjectCreator.bat` file launcher.
 
 ---
 
 ## 🖼️ Presets
 
-Place your `.nk` templates inside the `presets/` folder:
+Place your `.nk` templates in the `/presets/` folder:
 ```
 presets/
 └─ ACES_Nuke15.9_degrane_w_QCchecker.nk
 ```
 
 These templates define the base structure for generated Nuke scripts.
-
-
 
 ⚠️ **Important:**  
 When creating or editing a preset `.nk` file, **do not rename** the top-level **Read** and **Write** nodes.  
@@ -175,16 +181,25 @@ They must keep the original names:
 - `Write_preview`
 
 Otherwise, ProjectCreator will not be able to correctly inject file paths and parameters.
+
 ---
 
-## 🧑‍💻 Development Notes
+## 🧾 Change Log
 
-- Version baseline for all scripts: **v1.01**
-- Language: **Python**
-- GUI: **Dear PyGui**
-- OS: **Windows 10/11**
-- Author: **Aleš Ushakou**
-- Year: **2025**
+### v1.10 (Current)
+- Added **Utility** tab with **Bulk Rename** feature  
+- Improved path resolution and INI handling  
+- Better preset validation in `create_nk.py`  
+- Enhanced progress bars and logging  
+- Fixed header centering and scaling  
+- Now Nuke script resolution is correctly set from **Read** node  
+- Fixed incorrect `root_last` frame calculation in `create_nk.py`
+
+### v1.01
+- Introduced Nuke preset integration  
+- Added color management from `.ini`  
+- Implemented auto `.nk` generation  
+- First public release
 
 ---
 
@@ -198,15 +213,17 @@ You may use, modify, and distribute this software freely with credit.
 
 ## 💬 Contact
 
-If you encounter bugs, ideas, or want to contribute —  
-open an issue or pull request on GitHub.
+For suggestions, contributions, or bug reports —  
+open an issue or pull request on GitHub.  
 
-📎 Connect with the author on [LinkedIn](https://www.linkedin.com/in/ale%C5%A1-ushakou-84250814/).
+📎 Connect with the author on [LinkedIn](https://www.linkedin.com/in/ale%C5%A1-ushakou-84250814/)  
+💻 GitHub: [AlesUshakou/ProjectCreator](https://github.com/AlesUshakou/ProjectCreator)
 
 ---
 
-_“Time not for routine, but only for creativity!” — ProjectCreator 
+_“Time not for routine, but only for creativity!” — ProjectCreator_
 
+---
 
 ### 🏷️ GitHub Topics
-`nuke` • `python` •  `vfx-tools` • `postproduction` • `freelance-tools` • `pipeline` • `folder-structure` • `automation`
+`nuke` • `python` • `vfx-tools` • `postproduction` • `freelance-tools` • `pipeline` • `automation`
