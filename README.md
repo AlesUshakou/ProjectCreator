@@ -186,7 +186,12 @@ Otherwise, ProjectCreator will not be able to correctly inject file paths and pa
 
 ## 🧾 Change Log
 
-### v1.10 (Current)
+### v1.11 (Current)
+
+- Added a progress bar for individual shots
+- Fixed bugs when working with video files
+
+### v1.10 
 - Added **Utility** tab with **Bulk Rename** feature  
 - Improved path resolution and INI handling  
 - Better preset validation in `create_nk.py`  
