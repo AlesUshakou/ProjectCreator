@@ -1,7 +1,11 @@
 # 🎬 ProjectCreator
 ![Header Screenshot](src/ProjectCreator_header.png)
-![Last update](https://img.shields.io/github/last-commit/AlesUshakou/ProjectCreator?svg=true)
-![License](https://img.shields.io/github/license/AlesUshakou/ProjectCreator?svg=true)
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.10-blue" alt="Version"/>
+  <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"/>
+</p>
+
 
 ---
 
