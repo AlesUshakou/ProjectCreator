@@ -210,7 +210,7 @@ Otherwise, ProjectCreator will not be able to correctly inject file paths and pa
 
 ---
 
-### Evolution
+### ❤️ Evolution
 
 <a href="https://star-history.com/#AlesUshakou/ProjectCreator&Date">
   <picture width=640>
