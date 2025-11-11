@@ -2,7 +2,7 @@
 ![Header Screenshot](src/ProjectCreator_header.png)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.10-blue" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-1.11-blue" alt="Version"/>
   <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"/>
 </p>
 
