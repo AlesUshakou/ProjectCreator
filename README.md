@@ -1,6 +1,9 @@
 # 🎬 ProjectCreator
 ![Header Screenshot](src/ProjectCreator_header.png)
-_Automated project folder and Nuke script creator — by Aleš Ushakou (2025)_
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.10-blue" alt="Version"/>
+  <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"/>
+</p>
 
 ---
 
