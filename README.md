@@ -1,9 +1,7 @@
 # 🎬 ProjectCreator
 ![Header Screenshot](src/ProjectCreator_header.png)
-<p align="center">
-  <img src="https://img.shields.io/badge/version-1.10-blue" alt="Version"/>
-  <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"/>
-</p>
+![Last update](https://img.shields.io/github/last-commit/AlesUshakou/ProjectCreator?svg=true)
+![License](https://img.shields.io/github/license/AlesUshakou/ProjectCreator?svg=true)
 
 ---
 
@@ -208,6 +206,18 @@ Otherwise, ProjectCreator will not be able to correctly inject file paths and pa
 - Added color management from `.ini`  
 - Implemented auto `.nk` generation  
 - First public release
+
+
+---
+
+### Evolution
+
+<a href="https://star-history.com/#AlesUshakou/ProjectCreator&Date">
+  <picture width=640>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=AlesUshakou/ProjectCreator&type=Date&theme=dark" />
+    <img src="https://api.star-history.com/svg?repos=AlesUshakou/ProjectCreator&type=Date" alt="starts" width="320">
+  </picture>
+</a>
 
 ---
 
