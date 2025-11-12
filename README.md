@@ -164,7 +164,8 @@ Run directly:
 python ProjectCreator.py
 ```
 
-Or use a `ProjectCreator.bat` file launcher.
+Or use a `ProjectCreator.bat` file launcher. 
+Or `ProjectCreator.vbs` for launching without a console.
 
 ---
 
