@@ -1,5 +1,5 @@
 # ProjectCreator.py
-# ProjectCreator v1.11. Aleš Ushakou, 2025
+# ProjectCreator v1.2. Aleš Ushakou, 2025
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
@@ -10,8 +10,9 @@ import dearpygui.dearpygui as dpg
 import sys
 import os
 import configparser
+import time
 
-APP_TITLE = "ProjectCreator v1.11"
+APP_TITLE = "ProjectCreator v1.2"
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 VIDEO_EXTS = {".mov", ".mp4", ".mxf"}
@@ -19,10 +20,11 @@ SEQ_EXTS = {".exr", ".dpx", ".tiff", ".tif", ".png", ".jpg", ".jpeg"}
 
 INI_PATH = SCRIPT_DIR / "ProjectCreator.ini"
 HEADER_IMAGE_PATH =  SCRIPT_DIR / "src" / "ProjectCreator_header.png"
+ICON_PATH = SCRIPT_DIR / "src" / "icon256.ico"
+
 
 OVERWRITE_CHOICES = ["None", "All", "Source", "Nuke Script"]
-
-
+TRANSFER_CHOICES = ["Copy", "Move"]
 
 
 
@@ -47,6 +49,16 @@ def log(msg: str):
         dpg.add_text(str(msg), parent="log_console")
 
 # ---------------- Helpers ----------------
+
+
+def _ensure_dir(path: Path):
+    """Создаёт папку, если её нет (включая всю цепочку)."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        log(f"[ERROR] Cannot create directory: {path} -> {e}")
+
+
 def _safe_mkdir(p: Path):
     p.mkdir(parents=True, exist_ok=True)
 
@@ -88,20 +100,42 @@ def _dir_is_effectively_empty(p: Path) -> bool:
         return False
     return True
 
+
 def _shot_prog_tag(shot_name: str) -> str:
-    # стабильный tag для прогресс-бара конкретного шота
     return f"shot_prog__{shot_name}"
 
 def _update_shot_progress(shot_name: str, value: float):
-    """Обновляет прогресс (0..1) для шота в таблице, если бар существует."""
     tag = _shot_prog_tag(shot_name)
-    if dpg.does_item_exist(tag):
-        dpg.set_value(tag, max(0.0, min(1.0, float(value))))
+    if not dpg.does_item_exist(tag):
+        return
+
+    v = max(0.0, min(1.0, float(value)))
+    dpg.set_value(tag, v)
+
+    percent = int(round(v * 100))
+    try:
+        dpg.configure_item(tag, overlay=f"{percent}%")
+    except Exception:
+        # на всякий случай, если версия DPG без overlay
+        pass
+
+def _set_global_progress(value: float):
+    """0..1 — обновляет общий progress-bar и проценты поверх."""
+    if not dpg.does_item_exist("create_progress"):
+        return
+    v = max(0.0, min(1.0, float(value)))
+    dpg.set_value("create_progress", v)
+    try:
+        dpg.configure_item("create_progress", overlay=f"{int(round(v * 100))}%")
+    except Exception:
+        # на случай старых версий DPG без overlay
+        pass
+
 
 def _list_sequence_files(src_seq_dir: Path) -> list[Path]:
+    """Собираем все файлы секвенции (без скрытых)."""
     files = []
     for root, dirs, fnames in os.walk(src_seq_dir):
-        # исключаем скрытые папки
         dirs[:] = [d for d in dirs if not d.startswith('.')]
         for fn in fnames:
             if fn.startswith('.'):
@@ -110,6 +144,123 @@ def _list_sequence_files(src_seq_dir: Path) -> list[Path]:
             if p.is_file():
                 files.append(p)
     return files
+
+def _copy_file_with_progress(src: Path, dst: Path, shot_name: str, chunk_size: int = 8 * 1024 * 1024):
+    """Копируем файл кусками и обновляем прогресс по размеру."""
+    total = src.stat().st_size or 1
+    copied = 0
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    with src.open("rb") as fsrc, dst.open("wb") as fdst:
+        while True:
+            chunk = fsrc.read(chunk_size)
+            if not chunk:
+                break
+            fdst.write(chunk)
+            copied += len(chunk)
+            _update_shot_progress(shot_name, copied / total)
+
+def _move_file_with_progress(src: Path, dst: Path, shot_name: str):
+    """
+    Move with progress.
+    On same disk: fast rename.
+    On network/different disk: fallback to copy+delete.
+    """
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(src, dst)  # быстрый move если на одном диске
+        _update_shot_progress(shot_name, 1.0)
+    except Exception:
+        # если не получилось, копируем chunk'ами + удаляем
+        _copy_file_with_progress(src, dst, shot_name)
+        try:
+            src.unlink()
+        except Exception as e:
+            log(f"[WARN] Cannot delete source after move: {src} -> {e}")
+
+
+
+def _human_elapsed(sec: float) -> str:
+    if sec < 60:
+        return f"{sec:.1f}s"
+    m, s = divmod(sec, 60)
+    return f"{int(m)}m {s:.1f}s"
+
+
+def _show_done_modal(elapsed_sec: float, shots_done: int, shots_total: int):
+
+    if dpg.does_item_exist("done_modal"):
+        dpg.delete_item("done_modal")
+
+    win_w, win_h = 380, 200
+
+    # центрируем окно вьюпорта
+    vp_w = dpg.get_viewport_width()
+    vp_h = dpg.get_viewport_height()
+    pos_x = int((vp_w - win_w) / 2)
+    pos_y = int((vp_h - win_h) / 2)
+
+    with dpg.window(tag="done_modal",
+                    modal=True,
+                    no_collapse=True,
+                    no_resize=True,
+                    no_move=True,
+                    width=win_w,
+                    height=win_h,
+                    pos=(pos_x, pos_y)):
+
+        dpg.add_spacer(height=10)
+
+        # Заголовок
+        dpg.add_text("All Projects Created", indent=80)
+
+        dpg.add_spacer(height=5)
+        dpg.add_text(f"Shots completed: {shots_done}/{shots_total}", indent=60)
+        dpg.add_text(f"Elapsed time: {_human_elapsed(elapsed_sec)}", indent=60)
+
+        dpg.add_spacer(height=15)
+
+        # Кнопка по центру
+        with dpg.group(horizontal=True):
+            dpg.add_spacer(width=(win_w - 80) // 2)   # 80 = width кнопки
+            dpg.add_button(label="OK", width=80,
+                           callback=lambda: dpg.delete_item("done_modal"))
+
+
+
+# a more convenient bowse for specifying a directory
+def _browse_dir_to(target_tag: str):
+    """Открывает системный диалог выбора папки и записывает путь в input_text."""
+    import tkinter as tk
+    from tkinter import filedialog
+
+    root = tk.Tk()
+    root.withdraw()
+
+    folder = filedialog.askdirectory()
+    root.destroy()
+
+    if not folder:
+        return
+
+    # На всякий случай приводим к строке
+    folder_str = str(folder)
+
+    # Проверяем, что item существует и это именно input_text
+    if not dpg.does_item_exist(target_tag):
+        log(f"[ERROR] Browse: target item '{target_tag}' does not exist")
+        return
+
+    # Ставим значение
+    try:
+        dpg.set_value(target_tag, folder_str)
+    except Exception as e:
+        log(f"[ERROR] Browse set_value failed for '{target_tag}': {e}")
+
+
+
+
 
 
 
@@ -305,7 +456,13 @@ def _add_item_row(item: dict):
     # столбец: Action
     dpg.add_button(label="Remove", user_data=item, callback=_cb_remove_item, parent=row)
     # столбец: Progress (новое)
-    dpg.add_progress_bar(tag=_shot_prog_tag(item["name"]), parent=row, width=-1, default_value=0.0)
+    dpg.add_progress_bar(
+        tag=_shot_prog_tag(item["name"]),
+        parent=row,
+        width=-1,
+        default_value=0.0,
+        overlay="0%"
+    )
 
 def _cb_remove_item(sender, app_data, user_data):
     global _found_items
@@ -406,45 +563,67 @@ def _generate_nuke_script(shot_dir: Path, item: dict, cfg: dict, overwrite_nk: b
     log(f"[NK] Created {nk_path}")
 
 
-def _on_create_projects(dest: Path, overwrite_mode: str):
+def _on_create_projects(dest: Path, overwrite_mode: str, transfer_mode: str):
+
+    # создаем папку назначения
+    _ensure_dir(dest)
+
     if not _found_items:
         log("[WARN] Nothing to create.")
         return
 
+    do_move       = (transfer_mode == "Move")
     overwrite_src = overwrite_mode in ("All", "Source")
     overwrite_nk  = overwrite_mode in ("All", "Nuke Script")
     cfg = _read_ini_values()
 
+    _t0 = time.perf_counter()
+
     total = len(_found_items) or 1
+    _set_global_progress(0.0)
+
     for idx, item in enumerate(_found_items, 1):
-        if dpg.does_item_exist("create_progress"):
-            dpg.set_value("create_progress", idx / total)
+
 
         shot   = _create_basic_structure(dest, item)
         in_dir = shot / "in"
         _safe_mkdir(in_dir)
 
         shot_name = item["name"]
-        _update_shot_progress(shot_name, 0.0)  # << добавили
+        _update_shot_progress(shot_name, 0.0)
+
+        # --- подготовка флага перезаписи для .nk ---
+        comp_dir = shot / "comp"
+        nk_path  = comp_dir / f"{shot.name}_comp_v001.nk"
+        # если .nk ещё нет — создать обязательно, даже при overwrite_mode = "None"
+        force_overwrite = overwrite_nk or (not nk_path.exists())
 
         try:
+            # 1) СНАЧАЛА создаём/обновляем .nk, пока source ещё существует
+            try:
+                _generate_nuke_script(shot, item, cfg, force_overwrite)
+            except Exception as e_nk:
+                log(f"[ERROR] create_nk: {e_nk}. Skipping .nk creation for {shot_name}")
+
+            # 2) Дальше занимаемся файлами
+
+            # ---------------- VIDEO ----------------
             if item["type"] == "video":
                 dst_file = in_dir / item["src"].name
 
-                if overwrite_src:
-                    _safe_copy(item["src"], dst_file)
-                    log(f"[COPY] {item['name']}: {dst_file.name}")
-                else:
-                    if not dst_file.exists():
-                        _safe_copy(item["src"], dst_file)
-                        log(f"[COPY] {item['name']}: {dst_file.name}")
+                if overwrite_src or not dst_file.exists():
+                    if do_move:
+                        _move_file_with_progress(item["src"], dst_file, shot_name)
+                        log(f"[MOVE] {shot_name}: {dst_file.name}")
                     else:
-                        log(f"[SKIP] {item['name']}: {dst_file.name} exists")
+                        _copy_file_with_progress(item["src"], dst_file, shot_name)
+                        log(f"[COPY] {shot_name}: {dst_file.name}")
+                else:
+                    log(f"[SKIP] {shot_name}: {dst_file.name} exists")
+                    _update_shot_progress(shot_name, 1.0)
 
-                _update_shot_progress(shot_name, 1.0)  # << добавили
-
+            # ---------------- SEQUENCE ----------------
             else:
-                # === Новый блок для секвенций (пофайловое копирование + прогресс) ===
                 src_seq_dir = item["src"]
                 dst_seq_dir = in_dir / src_seq_dir.name
 
@@ -455,43 +634,88 @@ def _on_create_projects(dest: Path, overwrite_mode: str):
                 if overwrite_src:
                     if dst_seq_dir.exists():
                         shutil.rmtree(dst_seq_dir, ignore_errors=True)
-                    _safe_mkdir(dst_seq_dir)
+                    dst_seq_dir.mkdir(parents=True, exist_ok=True)
 
                     for sp in files:
                         rel = sp.relative_to(src_seq_dir)
                         dp = dst_seq_dir / rel
                         dp.parent.mkdir(parents=True, exist_ok=True)
-                        _safe_copy(sp, dp)
+
+                        if do_move:
+                            try:
+                                shutil.move(sp, dp)
+                            except Exception as e:
+                                log(f"[WARN] move failed for {sp.name}, fallback to copy: {e}")
+                                _safe_copy(sp, dp)
+                                try:
+                                    sp.unlink()
+                                except Exception as err:
+                                    log(f"[WARN] cannot delete source file after fallback: {err}")
+                        else:
+                            _safe_copy(sp, dp)
+
                         copied += 1
                         _update_shot_progress(shot_name, copied / total_files)
 
-                    log(f"[COPY] {item['name']}: seq {dst_seq_dir.name}")
+                    if do_move:
+                        try:
+                            shutil.rmtree(src_seq_dir, ignore_errors=True)
+                            log(f"[MOVE] {shot_name}: seq folder removed: {src_seq_dir}")
+                        except Exception as err:
+                            log(f"[WARN] cannot remove source seq folder: {err}")
+                    else:
+                        log(f"[COPY] {shot_name}: seq {dst_seq_dir.name}")
 
                 else:
                     if not dst_seq_dir.exists():
-                        _safe_mkdir(dst_seq_dir)
+                        dst_seq_dir.mkdir(parents=True, exist_ok=True)
 
                     for sp in files:
                         rel = sp.relative_to(src_seq_dir)
                         dp = dst_seq_dir / rel
                         dp.parent.mkdir(parents=True, exist_ok=True)
+
                         if not dp.exists():
-                            _safe_copy(sp, dp)
+                            if do_move:
+                                try:
+                                    shutil.move(sp, dp)
+                                except Exception as e:
+                                    log(f"[WARN] move failed for {sp.name}, fallback to copy: {e}")
+                                    _safe_copy(sp, dp)
+                                    try:
+                                        sp.unlink()
+                                    except Exception as err:
+                                        log(f"[WARN] cannot delete source file after fallback: {err}")
+                            else:
+                                _safe_copy(sp, dp)
+
                         copied += 1
                         _update_shot_progress(shot_name, copied / total_files)
 
-                    if copied == 0 and any(dst_seq_dir.iterdir()):
-                        log(f"[SKIP] {item['name']}: seq {dst_seq_dir.name} exists")
+                    if do_move:
+                        try:
+                            shutil.rmtree(src_seq_dir, ignore_errors=True)
+                            log(f"[MOVE] {shot_name}: seq folder removed: {src_seq_dir}")
+                        except Exception as err:
+                            log(f"[WARN] cannot remove source seq folder: {err}")
                     else:
-                        log(f"[COPY] {item['name']}: seq {dst_seq_dir.name}")
+                        log(f"[COPY] {shot_name}: seq {dst_seq_dir.name}")
 
-            _generate_nuke_script(shot, item, cfg, overwrite_nk)
+            _update_shot_progress(shot_name, 1.0)
 
         except Exception as e:
-            log(f"[ERROR] {item.get('name','<unknown>')}: {e}")
-            _update_shot_progress(shot_name, 1.0)  # чтобы не зависал на 0 при ошибке
+            log(f"[ERROR] {shot_name}: {e}")
+            _update_shot_progress(shot_name, 1.0)
 
-    log("✅ Copy/Create finished. Done!")
+        _set_global_progress(idx / total)
+
+    elapsed = time.perf_counter() - _t0
+    log(f"Copy/Create finished. Done! ({_human_elapsed(elapsed)})")
+    _set_global_progress(1.0)
+    _show_done_modal(elapsed, shots_done=len(_found_items), shots_total=len(_found_items))
+
+
+
 
 
 # ---------------- Callbacks ----------------
@@ -511,10 +735,13 @@ def _cb_scan():
 def _cb_create():
     dest = Path(dpg.get_value("dest_input") or "")
     if not dest.exists():
-        log("[ERROR] Invalid destination.")
-        return
+        _ensure_dir(dest)
+
     overwrite_mode = dpg.get_value("overwrite_mode") or "None"
-    _on_create_projects(dest, overwrite_mode)
+    transfer_mode = dpg.get_value("transfer_mode") or "Copy"
+
+    _on_create_projects(dest, overwrite_mode, transfer_mode)
+
 
 # ---------------- Header (centered) ----------------
 _HEADER_TEX = None
@@ -552,13 +779,14 @@ def _build_project_params_tab(parent):
     row_src = dpg.add_group(parent=root, horizontal=True)
     dpg.add_text("Source folder:", parent=row_src)
     dpg.add_input_text(tag="source_input", width=520, parent=row_src)
-    dpg.add_button(label="Browse", callback=lambda: dpg.show_item("dlg_source"), parent=row_src)
+    dpg.add_button(label="Browse", callback=lambda: _browse_dir_to("source_input"), parent=row_src)
 
     dpg.add_spacer(height=6, parent=root)
     row_dst = dpg.add_group(parent=root, horizontal=True)
     dpg.add_text("Destination:", parent=row_dst)
     dpg.add_input_text(tag="dest_input", width=520, parent=row_dst)
-    dpg.add_button(label="Browse", callback=lambda: dpg.show_item("dlg_dest"), parent=row_dst)
+    dpg.add_button(label="Browse", callback=lambda: _browse_dir_to("dest_input"), parent=row_dst)
+
 
     dpg.add_spacer(height=8, parent=root)
     row_scan = dpg.add_group(parent=root, horizontal=True)
@@ -576,12 +804,36 @@ def _build_project_params_tab(parent):
     dpg.add_spacer(height=6, parent=root)
     row_create = dpg.add_group(parent=root, horizontal=True)
     dpg.add_button(label="Create Project", width=140, callback=_cb_create, parent=row_create)
-    dpg.add_progress_bar(tag="create_progress", width=400, parent=row_create)
+    dpg.add_progress_bar(
+        tag="create_progress",
+        width=400,
+        default_value=0.0,
+        overlay="0%",
+        parent=row_create   
+    )
 
     dpg.add_spacer(height=6, parent=root)
     row_opts = dpg.add_group(parent=root, horizontal=True)
+
     dpg.add_text("Overwrite if exists:", parent=row_opts)
-    dpg.add_combo(OVERWRITE_CHOICES, default_value="All", tag="overwrite_mode", width=160, parent=row_opts)
+    dpg.add_combo(
+        OVERWRITE_CHOICES,
+        default_value="All",
+        tag="overwrite_mode",
+        width=160,
+        parent=row_opts
+    )
+
+    dpg.add_spacer(width=30, parent=row_opts)
+
+    dpg.add_text("Transfer:", parent=row_opts)
+    dpg.add_combo(
+        ["Copy", "Move"],
+        default_value="Move",
+        tag="transfer_mode",
+        width=160,
+        parent=row_opts
+    )
 
     dpg.add_spacer(height=10, parent=root)
     dpg.add_text("Log:", parent=root)
@@ -646,6 +898,15 @@ def main():
     dpg.create_context()
     build_ui()
     dpg.create_viewport(title=APP_TITLE, width=1280, height=880)
+
+    # Иконка окна (если файл есть)
+    if ICON_PATH.exists():
+        try:
+            dpg.set_viewport_small_icon(str(ICON_PATH))
+            dpg.set_viewport_large_icon(str(ICON_PATH))
+        except Exception as e:
+            log(f"[WARN] Cannot set window icon: {e}")
+
     dpg.setup_dearpygui()
     dpg.show_viewport()
 

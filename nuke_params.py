@@ -1,5 +1,5 @@
-# nuke_params.py
-# ProjectCreator v1.01. Aleš Ushakou, 2025
+# nuke_params for ProjectCreator
+# Aleš Ushakou, 2025
 # -*- coding: utf-8 -*-
 
 from pathlib import Path

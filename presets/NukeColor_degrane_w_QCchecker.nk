@@ -1,57 +1,22 @@
-#! C:/Program Files/Nuke15.1v9/nuke-15.1.9.dll -nx
-version 15.1 v9
-define_window_layout_xml {<?xml version="1.0" encoding="UTF-8"?>
-<layout version="1.0">
-    <window x="0" y="0" w="1917" h="1020" screen="0">
-        <splitter orientation="1">
-            <split size="0"/>
-            <dock id="" hideTitles="1"/>
-            <split size="1294" stretch="1"/>
-            <splitter orientation="2">
-                <split size="64"/>
-                <dock id="" activePageId="Toolbar.1">
-                    <page id="Toolbar.1"/>
-                </dock>
-                <split size="508"/>
-                <dock id="" activePageId="Viewer.1">
-                    <page id="Viewer.1"/>
-                </dock>
-                <split size="402"/>
-                <dock id="" activePageId="DAG.1" focus="true">
-                    <page id="DAG.1"/>
-                    <page id="Curve Editor.1"/>
-                    <page id="DopeSheet.1"/>
-                </dock>
-            </splitter>
-            <split size="615"/>
-            <dock id="" activePageId="Properties.1">
-                <page id="Properties.1"/>
-                <page id="uk.co.thefoundry.backgroundrenderview.1"/>
-                <page id="Scenegraph.1"/>
-            </dock>
-        </splitter>
-    </window>
-</layout>
-}
 Root {
  inputs 0
- name E:/_ProjectCreator/presets/ACES_Nuke15.9_degrane_w_QCchecker.nk
+ name NukeColor_degrane_w_QCchecker.nk
  project_directory "\[python \{nuke.script_directory()\}]"
  last_frame 1
+ lock_range true
  fps 25
- format "640 480 0 0 640 480 1 PC_auto_640x480"
+ format "1920 1080 0 0 1920 1080 1 PC_auto_1920x1080"
  proxy_type scale
- colorManagement OCIO
- OCIO_config aces_1.2
- customOCIOConfigPath Y:/_nuke_plugins/ACES_1.2/config.ocio
- defaultViewerLUT "OCIO LUTs"
- workingSpaceLUT scene_linear
- monitorLut "sRGB (ACES)"
- monitorOutLUT "sRGB (ACES)"
- int8Lut matte_paint
- int16Lut texture_paint
- logLut compositing_log
- floatLut scene_linear
+ colorManagement Nuke
+ OCIO_config custom
+ workingSpaceLUT linear
+ monitorLut sRGB
+ monitorOutLUT rec709
+ int8Lut sRGB
+ int16Lut sRGB
+ logLut Cineon
+ floatLut linear
+ onScriptLoad "\n"
 }
 BackdropNode {
  inputs 0
@@ -78,13 +43,12 @@ BackdropNode {
 Read {
  inputs 0
  localizationPolicy on
- origfirst {{first}}
- origlast {{last}}
+ format "1920 1080 0 0 1920 1080 1 HD_1080"
  origset true
  name Read_source
  label "<font size=\"3\" color =#548DD4><b> frames: </b></font> <font color = red> \[expr \[value last] -\[value first] +1]</font>"
  xpos 292
- ypos -254
+ ypos -267
 }
 NoOp {
  name Anchor_6f523ce26
@@ -115,7 +79,7 @@ NoOp {
  addUserKnob {22 buttonHelp l Help -STARTLINE T stamps.showHelp()}
  addUserKnob {26 version l " " t "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025." -STARTLINE T "<a href=\"http://www.nukepedia.com/gizmos/other/stamps\" style=\"color:#666;text-decoration: none;\"><span style=\"color:#666\"><big>Stamps v1.2</big></span></a>"}
 }
-set N6f1f2400 [stack 0]
+set Nc5ce5c00 [stack 0]
 OFXcom.absoft.neatvideo5_v5 {
  DNP ""
  ProfileName "no profile"
@@ -157,7 +121,7 @@ NoOp {
  addUserKnob {22 buttonHelp l Help -STARTLINE T stamps.showHelp()}
  addUserKnob {26 version l " " t "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025." -STARTLINE T "<a href=\"http://www.nukepedia.com/gizmos/other/stamps\" style=\"color:#666;text-decoration: none;\"><span style=\"color:#666\"><big>Stamps v1.2</big></span></a>"}
 }
-set N6f1f2c00 [stack 0]
+set N12902400 [stack 0]
 PostageStamp {
  name Stamp2
  help "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025"
@@ -209,7 +173,7 @@ PostageStamp {
  addUserKnob {22 buttonHelp l Help -STARTLINE T stamps.showHelp()}
  addUserKnob {26 version l " " t "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025." -STARTLINE T "<a href=\"http://www.nukepedia.com/gizmos/other/stamps\" style=\"color:#666;text-decoration: none;\"><span style=\"color:#666\"><big>Stamps v1.2</big></span></a>"}
 }
-push $N6f1f2400
+push $Nc5ce5c00
 PostageStamp {
  name Stamp1
  help "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025"
@@ -261,7 +225,7 @@ PostageStamp {
  addUserKnob {22 buttonHelp l Help -STARTLINE T stamps.showHelp()}
  addUserKnob {26 version l " " t "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025." -STARTLINE T "<a href=\"http://www.nukepedia.com/gizmos/other/stamps\" style=\"color:#666;text-decoration: none;\"><span style=\"color:#666\"><big>Stamps v1.2</big></span></a>"}
 }
-push $N6f1f2c00
+push $N12902400
 Group {
  inputs 3
  name DasGrain
@@ -349,7 +313,7 @@ Group {
  addUserKnob {26 info l "" +STARTLINE T "Last change: 2021-03-07\n\n"}
  addUserKnob {26 name_1 l "" +STARTLINE T "Fabian Holtz"}
  addUserKnob {26 mail l "" +STARTLINE T "<a href=\"mailto:holtzf+nuke@gmail.com?subject=Help with DasGrain v1.7.8\"><span style=\"color:#C8C8C8;\">holtzf+nuke@gmail.com</a>"}
- addUserKnob {26 testimonial l "" +STARTLINE T "<br><br><br><i>&laquo;DasGrain is officially the best thing ever&raquo;</i><br>&mdash; anonymous<br><br>"}
+ addUserKnob {26 testimonial l "" +STARTLINE T "<br><br><br><i>&laquo;Totally awesome!&raquo;</i><br>&mdash; anonymous<br><br>"}
  addUserKnob {26 ""}
  addUserKnob {26 credit l "" +STARTLINE T "<br>VoronoiScatter based on <a href=\"http://www.nukepedia.com/blink/image/voronoi/\"><span style=\"color:#C8C8C8;\">Ivan Busquets' implementation</a> of<br> libNoise's\nVoronoi generator"}
  addUserKnob {26 thanks l "" +STARTLINE T "<br>Special thanks to Ben Dickson for bearing with my questions and<br>problems and RSP comp for the valuable feedback."}
@@ -496,8 +460,8 @@ Group {
   number 2
  }
  OCIOColorSpace {
-  in_colorspace {{OCIOColorSpace1.in_colorspace x1 9}}
-  out_colorspace {{OCIOColorSpace1.out_colorspace x1 9}}
+  in_colorspace {{OCIOColorSpace1.in_colorspace 7 9}}
+  out_colorspace {{OCIOColorSpace1.out_colorspace 7 9}}
   name OCIOColorSpace2
   xpos 730
   ypos -490
@@ -507,20 +471,20 @@ Group {
   xpos 764
   ypos -390
  }
-set N6f276000 [stack 0]
+set N12903800 [stack 0]
  Dot {
   name Dot28
   xpos 764
   ypos -198
  }
-set N6f276400 [stack 0]
+set N12903c00 [stack 0]
  Dot {
   name Dot32
   xpos 764
   ypos 234
  }
-set N6f276800 [stack 0]
-push $N6f276400
+set N1284c000 [stack 0]
+push $N12903c00
  Dot {
   name Dot27
   xpos 624
@@ -537,7 +501,7 @@ push $N6f276400
   xpos 624
   ypos -54
  }
-set N6f277400 [stack 0]
+set N1284cc00 [stack 0]
  Input {
   inputs 0
   name PLATE
@@ -552,7 +516,7 @@ set N6f277400 [stack 0]
   xpos 324
   ypos -726
  }
-set N6f277c00 [stack 0]
+set N1284d400 [stack 0]
  OCIOColorSpace {
   in_colorspace scene_linear
   out_colorspace scene_linear
@@ -565,7 +529,7 @@ set N6f277c00 [stack 0]
   xpos 324
   ypos -198
  }
-set N899c4400 [stack 0]
+set N1284dc00 [stack 0]
  Dot {
   name Dot6
   xpos 464
@@ -600,7 +564,7 @@ set N899c4400 [stack 0]
   xpos 464
   ypos 90
  }
-push $N6f277400
+push $N1284cc00
  Merge2 {
   inputs 2
   operation plus
@@ -634,8 +598,8 @@ push $N6f277400
   xpos 624
   ypos 306
  }
-set N89a00800 [stack 0]
-push $N6f276800
+set N125f6000 [stack 0]
+push $N1284c000
  Merge2 {
   inputs 2
   operation from
@@ -653,19 +617,19 @@ push $N6f276800
   xpos 764
   ypos 522
  }
-set N89a01000 [stack 0]
+set N125f6800 [stack 0]
  Dot {
   name Dot30
   xpos 764
   ypos 690
  }
-set N89a01400 [stack 0]
+set N125f6c00 [stack 0]
  Dot {
   name Dot55
   xpos 764
   ypos 1170
  }
-set N89a01800 [stack 0]
+set N125f7000 [stack 0]
  Input {
   inputs 0
   name mask
@@ -680,21 +644,21 @@ set N89a01800 [stack 0]
   xpos 1204
   ypos 258
  }
-set N89a2c000 [stack 0]
+set N125f7800 [stack 0]
  Dot {
   name Dot26
   xpos 1204
   ypos 1074
  }
-set N89a2c400 [stack 0]
+set N125f7c00 [stack 0]
  Invert {
   name Invert2
   xpos 180
   ypos 1064
   disable {{!parent.invert_1}}
  }
-push $N89a01400
-push $N899c4400
+push $N125f6c00
+push $N1284dc00
  Merge2 {
   inputs 2
   operation from
@@ -711,14 +675,14 @@ push $N899c4400
   xpos 324
   ypos 786
  }
-set N89a2d000 [stack 0]
+set N12612800 [stack 0]
  Dot {
   name Dot5
   xpos 104
   ypos 786
  }
-set N89a2d400 [stack 0]
-push $N89a2d400
+set N12612c00 [stack 0]
+push $N12612c00
  Copy {
   inputs 2
   from0 {{{parent.Copy2.from0}}}
@@ -737,8 +701,8 @@ push $N89a2d400
   xpos 70
   ypos 926
  }
-set N89a2dc00 [stack 0]
-push $N89a01000
+set N12613400 [stack 0]
+push $N125f6800
  Colorspace {
   colorspace_out AlexaV3LogC
   name Colorspace5
@@ -756,14 +720,14 @@ push $N89a01000
   xpos -116
   ypos 522
  }
-set N89a5c800 [stack 0]
+set Nd8ee000 [stack 0]
  Dot {
   name Dot48
   xpos -116
   ypos 786
  }
-set N89a5cc00 [stack 0]
-push $N89a5cc00
+set Nd8ee400 [stack 0]
+push $Nd8ee400
  Copy {
   inputs 2
   from0 rgba.blue
@@ -796,7 +760,7 @@ push $N89a5cc00
   xpos -40
   ypos 985
  }
-push $N89a2dc00
+push $N12613400
  Copy {
   inputs 2
   from0 rgba.alpha
@@ -855,7 +819,7 @@ push $N89a2dc00
   xpos 70
   ypos 1424
  }
-push $N89a5c800
+push $Nd8ee000
  Dot {
   name Dot16
   xpos -336
@@ -880,7 +844,7 @@ push $N89a5c800
   xpos 840
   ypos 1502
  }
-push $N6f277c00
+push $N1284d400
  Dot {
   name Dot51
   xpos 115
@@ -899,7 +863,7 @@ push $N6f277c00
   xpos 984
   ypos -605
  }
-set N89ad5000 [stack 0]
+set N10a2a800 [stack 0]
  Switch {
   inputs 2
   which {{parent.meta}}
@@ -922,13 +886,13 @@ set N89ad5000 [stack 0]
   xpos -685
   ypos 3762
  }
-push $N89a2c000
+push $N125f7800
  Dot {
   name Dot40
   xpos 874
   ypos 258
  }
-push $N89a00800
+push $N125f6000
  Dot {
   name Dot34
   xpos 624
@@ -943,10 +907,10 @@ push $N89a00800
   xpos 840
   ypos 374
  }
-push $N89ad5000
+push $N10a2a800
  OCIOColorSpace {
-  in_colorspace {{OCIOColorSpace1.in_colorspace x1 9}}
-  out_colorspace {{OCIOColorSpace1.out_colorspace x1 9}}
+  in_colorspace {{OCIOColorSpace1.in_colorspace 6 9}}
+  out_colorspace {{OCIOColorSpace1.out_colorspace 6 9}}
   name OCIOColorSpace3
   xpos 950
   ypos -490
@@ -956,7 +920,7 @@ push $N89ad5000
   xpos 984
   ypos -390
  }
-set N89b01000 [stack 0]
+set N10a4a800 [stack 0]
  Merge2 {
   inputs 2
   operation from
@@ -974,7 +938,7 @@ set N89b01000 [stack 0]
   xpos 984
   ypos 2658
  }
-set N89b01800 [stack 0]
+set N10a4b000 [stack 0]
  ColorLookup {
   lut {master {}
     red {curve}
@@ -985,7 +949,7 @@ set N89b01800 [stack 0]
   xpos 730
   ypos 2654
  }
-push $N89a2c400
+push $N125f7c00
  Dot {
   name Dot38
   xpos 1204
@@ -1001,19 +965,19 @@ push $N89a2c400
   xpos 544
   ypos 2271
  }
-set N89b32800 [stack 0]
+set N10a7c000 [stack 0]
  Dot {
   name Dot20
   xpos 544
   ypos 2391
  }
-push $N89b32800
+push $N10a7c000
  Dot {
   name Dot17
   xpos 434
   ypos 2271
  }
-set N89b33000 [stack 0]
+set N10a7c800 [stack 0]
  Dot {
   name Dot13
   xpos 214
@@ -1033,7 +997,7 @@ set N89b33000 [stack 0]
   xpos -116
   ypos 1938
  }
-push $N89a01800
+push $N125f7000
  ColorLookup {
   channels rgb
   lut {master {}
@@ -1050,7 +1014,7 @@ push $N89a01800
   xpos 764
   ypos 1746
  }
-push $N89a2d000
+push $N12612800
  Dot {
   name Dot33
   xpos 324
@@ -1073,7 +1037,7 @@ push $N89a2d000
   xpos 324
   ypos 1842
  }
-set N89b49000 [stack 0]
+set N10aa6800 [stack 0]
  Dot {
   name Dot25
   xpos 104
@@ -1121,7 +1085,7 @@ set N89b49000 [stack 0]
    xpos 214
    ypos -750
   }
-set N89b49c00 [stack 0]
+set N10aa7400 [stack 0]
   Dot {
    name Dot16
    xpos 434
@@ -1137,13 +1101,13 @@ set N89b49c00 [stack 0]
    xpos 434
    ypos -606
   }
-set N89b7c800 [stack 0]
+set N10ada000 [stack 0]
   Dot {
    name Dot15
    xpos 654
    ypos -606
   }
-set N89b7cc00 [stack 0]
+set N10ada400 [stack 0]
   Dot {
    name Dot7
    xpos 874
@@ -1179,7 +1143,7 @@ set N89b7cc00 [stack 0]
    xpos 874
    ypos -366
   }
-push $N89b7cc00
+push $N10ada400
   BlinkScript {
    ProgramGroup 1
    KernelDescription "3 \"VoroNoise\" iterate pixelWise c117be128a07c11b6d82fd34148d66b3bcac41976ec9c2082affe38e890c2c0f 2 \"src\" Read Point \"dst\" Write Point 6 \"Frequency\" Float 1 AABIQg== \"Seed\" Int 1 AAAAAA== \"aspect ratio\" Float 1 AACAPw== \"width\" Int 1 AAAAAA== \"height\" Int 1 AAAAAA== \"Randomness\" Float 1 AAAAPw== 6 \"frequency\" 1 1 Default \"seed\" 1 1 Default \"aspect_ratio\" 1 1 Default \"width\" 1 1 Default \"height\" 1 1 Default \"randomness\" 1 1 Default 0"
@@ -1244,8 +1208,8 @@ push $N89b7cc00
    xpos 654
    ypos 42
   }
-set N89be0400 [stack 0]
-push $N89b7c800
+set N7c81c00 [stack 0]
+push $N10ada000
   Expression {
    expr0 "(x + .5) / width"
    expr1 "(y + .5) / height"
@@ -1275,7 +1239,7 @@ push $N89b7c800
    xpos 434
    ypos 210
   }
-push $N89be0400
+push $N7c81c00
   Expression {
    temp_name0 view_index
    temp_expr0 "parent.parent.stereo == 1 ? \[lsearch \[value root.views] \[view]] / 2 : 0"
@@ -1336,13 +1300,13 @@ push $N89be0400
    xpos 654
    ypos 354
   }
-set N89c1e400 [stack 0]
+set N7cb5c00 [stack 0]
   Dot {
    name Dot13
    xpos 654
    ypos 546
   }
-push $N89c1e400
+push $N7cb5c00
   Dot {
    name Dot8
    xpos 874
@@ -1386,8 +1350,8 @@ push $N89c1e400
    xpos 874
    ypos 762
   }
-push $N89c1e400
-push $N89b49c00
+push $N7cb5c00
+push $N10aa7400
   FrameHold {
    firstFrame {{parent.sample_frame}}
    name FrameHold1
@@ -1409,7 +1373,7 @@ push $N89b49c00
    xpos 180
    ypos 350
   }
-set N89c54800 [stack 0]
+set Nd98e000 [stack 0]
   TimeBlur {
    divisions {{"max(Transform1.size == 1 ? 2 : pow2(Transform1.size), 1)"}}
    shutter 1
@@ -1419,8 +1383,8 @@ set N89c54800 [stack 0]
    ypos 446
    disable {{"parent.edge_blend_size < 1"}}
   }
-set N89c54c00 [stack 0]
-push $N89c54800
+set Nd98e400 [stack 0]
+push $Nd98e000
   Dot {
    name Dot1
    xpos -6
@@ -1462,7 +1426,7 @@ push $N89c54800
    xpos -6
    ypos 666
   }
-push $N89c54c00
+push $Nd98e400
   Grade {
    inputs 1+1
    white 1.4
@@ -1511,8 +1475,8 @@ push $N89c54c00
   xpos 104
   ypos 2391
  }
-push $N89b33000
-push $N89b49000
+push $N10a7c800
+push $N10aa6800
  Multiply {
   inputs 1+1
   channels rgb
@@ -1541,7 +1505,7 @@ push $N89b49000
   xpos 324
   ypos 2490
  }
-set N89cbe800 [stack 0]
+set N1278e000 [stack 0]
  MergeExpression {
   inputs 2
   temp_name0 reverse
@@ -1558,7 +1522,7 @@ set N89cbe800 [stack 0]
   xpos 324
   ypos 2850
  }
-push $N89b01800
+push $N10a4b000
  Merge2 {
   inputs 2
   operation plus
@@ -1575,10 +1539,10 @@ push $N89b01800
   xpos 984
   ypos 3018
  }
-set N89cbf800 [stack 0]
+set N1278f000 [stack 0]
  OCIOColorSpace {
-  in_colorspace {{OCIOColorSpace1.out_colorspace x1 9}}
-  out_colorspace {{OCIOColorSpace1.in_colorspace x1 9}}
+  in_colorspace {{OCIOColorSpace1.out_colorspace 6 9}}
+  out_colorspace {{OCIOColorSpace1.in_colorspace 6 9}}
   name OCIOColorSpace4
   xpos 950
   ypos 3086
@@ -1588,13 +1552,13 @@ set N89cbf800 [stack 0]
   xpos 984
   ypos 3162
  }
-set N89cf6000 [stack 0]
+set N1278f800 [stack 0]
  Dot {
   name Dot41
   xpos 1204
   ypos 3162
  }
-set N89cf6400 [stack 0]
+set N1278fc00 [stack 0]
  Dot {
   name Dot36
   xpos 1314
@@ -1607,7 +1571,7 @@ set N89cf6400 [stack 0]
   xpos 1280
   ypos 3254
  }
-push $N89cf6400
+push $N1278fc00
  Merge2 {
   inputs 2
   operation difference
@@ -1631,13 +1595,13 @@ push $N89cf6400
   xpos 1204
   ypos 3402
  }
-push $N89b01000
+push $N10a4a800
  Dot {
   name Dot45
   xpos 1424
   ypos -390
  }
-push $N89cbf800
+push $N1278f000
  Merge2 {
   inputs 2
   operation from
@@ -1653,7 +1617,7 @@ push $N89cbf800
   xpos 1424
   ypos 3522
  }
-push $N89cbe800
+push $N1278e000
  Dot {
   name Dot14
   xpos 104
@@ -1664,13 +1628,13 @@ push $N89cbe800
   xpos 104
   ypos 3402
  }
-push $N6f276000
+push $N12903800
  Dot {
   name Dot47
   xpos -556
   ypos -390
  }
-push $N899c4400
+push $N1284dc00
  Merge2 {
   inputs 2
   operation from
@@ -1686,7 +1650,7 @@ push $N899c4400
   xpos -556
   ypos 3522
  }
-push $N89cf6000
+push $N1278f800
  Switch {
   inputs 5
   which {{output}}
@@ -1738,7 +1702,7 @@ NoOp {
  addUserKnob {22 buttonHelp l Help -STARTLINE T stamps.showHelp()}
  addUserKnob {26 version l " " t "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025." -STARTLINE T "<a href=\"http://www.nukepedia.com/gizmos/other/stamps\" style=\"color:#666;text-decoration: none;\"><span style=\"color:#666\"><big>Stamps v1.2</big></span></a>"}
 }
-set N89d50400 [stack 0]
+set N127e9c00 [stack 0]
 PostageStamp {
  name Stamp3
  help "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025"
@@ -1795,7 +1759,7 @@ Dot {
  xpos 1549
  ypos 1871
 }
-push $N6f1f2400
+push $Nc5ce5c00
 PostageStamp {
  name Stamp4
  help "Stamps by Adrian Pueyo and Alexey Kuchinski.\nUpdated March 3 2025"
@@ -1876,7 +1840,7 @@ Group {
   xpos 885
   ypos 178
  }
-set N89d51c00 [stack 0]
+set N12665400 [stack 0]
  Input {
   inputs 0
   name Comp
@@ -1889,7 +1853,7 @@ set N89d51c00 [stack 0]
   xpos 1038
   ypos 83
  }
-set N89d7a400 [stack 0]
+set N12665c00 [stack 0]
  Difference {
   inputs 2
   gain {{parent.NoOp1.sensitivity*100}}
@@ -1897,7 +1861,7 @@ set N89d7a400 [stack 0]
   xpos 1004
   ypos 169
  }
-push $N89d7a400
+push $N12665c00
  Dot {
   name Dot49
   xpos 1190
@@ -1917,7 +1881,7 @@ push $N89d7a400
   xpos 1190
   ypos 317
  }
-push $N89d51c00
+push $N12665400
  Dot {
   name Dot48
   xpos 885
@@ -1945,13 +1909,25 @@ push $N89d51c00
   sensitivity 1
  }
 end_group
-push $N89d50400
+push $N127e9c00
+Write {
+ colorspace linear
+ in_colorspace scene_linear
+ out_colorspace scene_linear
+ ocioColorspace scene_linear
+ display ACES
+ view sRGB
+ name Write_comp
+ xpos 292
+ ypos 1882
+}
+push $N127e9c00
 Reformat {
  format "1920 1080 0 0 1920 1080 1 HD_1080"
  black_outside true
- name Reformat1
+ name Reformat2
  xpos 665
- ypos 1787
+ ypos 1793
 }
 Write {
  file_type mov
@@ -1967,7 +1943,7 @@ Write {
  mov64_bitrate_tolerance 4000000
  mov64_quality_min 1
  mov64_quality_max 3
- colorspace "Output - Rec.709"
+ colorspace rec709
  checkHashOnRead false
  in_colorspace scene_linear
  out_colorspace scene_linear
@@ -1977,15 +1953,4 @@ Write {
  name Write_preview
  xpos 665
  ypos 1867
-}
-push $N89d50400
-Write {
- in_colorspace scene_linear
- out_colorspace scene_linear
- ocioColorspace scene_linear
- display ACES
- view sRGB
- name Write_comp
- xpos 292
- ypos 1882
 }

@@ -1,5 +1,5 @@
-# create_nk.py
-# ProjectCreator v1.11. Aleš Ushakou, 2025
+# create_nk for ProjectCreator 
+# Aleš Ushakou, 2025
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
