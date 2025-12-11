@@ -174,7 +174,7 @@ Or `ProjectCreator.vbs` for launching without a console.
 Place your `.nk` templates in the `/presets/` folder:
 ```
 presets/
-└─ ACES_Nuke15.9_degrane_w_QCchecker.nk
+└─ ACES_degrane_w_QCchecker.nk
 ```
 
 These templates define the base structure for generated Nuke scripts.
