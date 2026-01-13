@@ -2,7 +2,7 @@
 ![Header Screenshot](src/ProjectCreator_header.png)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.2-blue" alt="Version"/>
+  <img src="https://img.shields.io/badge/version-1.21-blue" alt="Version"/>
   <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="License"/>
 </p>
 
@@ -192,13 +192,21 @@ Otherwise, ProjectCreator will not be able to correctly inject file paths and pa
 
 ## 🧾 Change Log
 
-### v1.2 (Current)
+### v1.21 (Current)
 
-  **ProjectCreator**:
+- Added **Help** tab
+- Script now automatically detects width, height, and pixel aspect ratio from Read_source.
+- Lots of minor fixes and improvements
+
+### v1.2
+
+**ProjectCreator**:
+
 - A more convenient bowse for specifying a directory
 - Lots of minor fixes and improvements
 
-  **PCUtility**:
+**PCUtility**:
+  
 - Bulk_rename now renames folders, not just the contents. A more convenient bowse for specifying a directory
 
 ### v1.11

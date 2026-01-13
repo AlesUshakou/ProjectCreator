@@ -1,0 +1,83 @@
+[Project Parameters]
+Source folder:
+Select a folder that contains shots.
+Supported sources:
+- Video files (mov, mp4, mxf)
+- Image sequences (folders with exr, dpx, tiff)
+
+Destination:
+Folder where project structures will be created.
+
+Scan:
+Searches Source folder for videos and sequences.
+
+Found items:
+List of detected shots.
+You can remove items before creating projects.
+
+Create Project:
+Creates project folders and copies or moves sources into /in.
+
+Overwrite if exists:
+None        - do not overwrite anything
+Source      - overwrite files in /in
+Nuke Script - overwrite .nk file only
+All         - overwrite both source and .nk
+
+Transfer:
+Copy - copy source files
+Move - move source files (faster on same disk)
+
+--------------------------------------------------
+
+[Nuke Script parameters]
+Nuke preset:
+Select a .nk template preset.
+
+Color model:
+Choose color pipeline (Nuke or ACES).
+
+Colorspace:
+Available colorspaces for selected color model.
+
+First frame:
+Project start frame (usually 1 or 1001).
+
+FPS:
+Project frame rate (24, 25, 30).
+
+Important:
+When creating your own .nk preset,
+DO NOT rename these nodes:
+Read_source
+Write_comp
+Write_preview
+
+--------------------------------------------------
+
+[Utility]
+Bulk Rename:
+
+Select folder:
+Choose folder where files will be renamed.
+
+Find terms:
+Comma-separated strings to remove or replace.
+Example:
+_v001,_WIP,raw
+
+Replace with:
+Replacement string.
+If empty, found terms will be removed.
+
+Recursive:
+If enabled, rename files in subfolders as well.
+
+--------------------------------------------------
+
+[About]
+
+Ales Ushakou
+
+https://www.linkedin.com/in/ale%C5%A1-ushakou-84250814/
+https://vimeo.com/sarus

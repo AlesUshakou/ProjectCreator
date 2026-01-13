@@ -1,5 +1,5 @@
 # ProjectCreator.py
-# ProjectCreator v1.2. Aleš Ushakou, 2025
+# ProjectCreator v1.21. Aleš Ushakou, 2025
 # -*- coding: utf-8 -*-
 
 from pathlib import Path
@@ -11,8 +11,32 @@ import sys
 import os
 import configparser
 import time
+import PCUtility
+import nuke_params
+import create_nk
 
-APP_TITLE = "ProjectCreator v1.2"
+
+
+
+APP_VERSION = "1.21"
+
+def _base_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "executable"):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+BASE_DIR = _base_dir()
+
+def resource_path(rel: str) -> Path:
+    return BASE_DIR / rel
+
+PRESETS_DIR = resource_path("presets")
+INI_PATH    = resource_path("ProjectCreator.ini")
+HELP_FILE   = resource_path("src/ProjectCreator_Help.txt")
+HEADER_PNG  = resource_path("src/ProjectCreator_header.png")
+FFPROBE_EXE = resource_path("ffmpeg/ffprobe.exe")
+
+APP_TITLE = "ProjectCreator v1.21"
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 VIDEO_EXTS = {".mov", ".mp4", ".mxf"}
@@ -22,6 +46,7 @@ INI_PATH = SCRIPT_DIR / "ProjectCreator.ini"
 HEADER_IMAGE_PATH =  SCRIPT_DIR / "src" / "ProjectCreator_header.png"
 ICON_PATH = SCRIPT_DIR / "src" / "icon256.ico"
 
+HELP_FILE = SCRIPT_DIR / "src" / "ProjectCreator_Help.txt"
 
 OVERWRITE_CHOICES = ["None", "All", "Source", "Nuke Script"]
 TRANSFER_CHOICES = ["Copy", "Move"]
@@ -186,6 +211,79 @@ def _human_elapsed(sec: float) -> str:
         return f"{sec:.1f}s"
     m, s = divmod(sec, 60)
     return f"{int(m)}m {s:.1f}s"
+
+    """Help"""
+
+def _load_help_sections() -> dict:
+    """
+    Reads ./src/ProjectCreator_Help.txt and returns:
+    { "Section title": "text..." }
+    Format:
+      [Section]
+      text...
+    """
+    if not HELP_FILE.exists():
+        return {
+            "Help file missing": f"Cannot find:\n{HELP_FILE}\n\nCreate this file to show Help content."
+        }
+
+    text = HELP_FILE.read_text(encoding="utf-8", errors="replace")
+    sections = {}
+    current = None
+    buf = []
+
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("[") and s.endswith("]") and len(s) > 2:
+            # flush previous
+            if current is not None:
+                sections[current] = "\n".join(buf).strip()
+            current = s[1:-1].strip()
+            buf = []
+        else:
+            buf.append(line.rstrip("\n"))
+
+    if current is not None:
+        sections[current] = "\n".join(buf).strip()
+
+    # fallback if file has no [sections]
+    if not sections:
+        sections["Help"] = text.strip()
+
+    return sections
+
+
+def _build_help_tab(parent):
+    sections = _load_help_sections()
+
+    dpg.add_spacer(height=6, parent=parent)
+    dpg.add_text("Help", parent=parent)
+    dpg.add_spacer(height=6, parent=parent)
+
+    # Collapsible sections
+    for title in ("Project Parameters", "Nuke Script parameters", "Utility"):
+        if title in sections:
+            with dpg.collapsing_header(label=title, default_open=False, parent=parent):
+                dpg.add_input_text(
+                    multiline=True,
+                    readonly=True,
+                    width=-1,
+                    height=220,
+                    default_value=sections[title],
+                )
+
+    # Any extra sections (if you add later)
+    for title, body in sections.items():
+        if title in ("Project Parameters", "Nuke Script parameters", "Utility"):
+            continue
+        with dpg.collapsing_header(label=title, default_open=True, parent=parent):
+            dpg.add_input_text(
+                multiline=True,
+                readonly=True,
+                width=-1,
+                height=200,
+                default_value=body,
+            )
 
 
 def _show_done_modal(elapsed_sec: float, shots_done: int, shots_total: int):
@@ -768,7 +866,7 @@ def _build_header(parent):
                            fill=(30, 30, 35, 255), color=(0, 0, 0, 0), parent=dl)
         dpg.draw_text((16, 14), "ProjectCreator", size=28, color=(230, 230, 240, 255), parent=dl)
         dpg.draw_text((18, 48), "by Ales Ushakou", size=16, color=(160, 160, 170, 255), parent=dl)
-        dpg.draw_text((290, 18), "v1.10", size=18, color=(200, 200, 210, 255), parent=dl)
+        dpg.draw_text((290, 18), "v1.21", size=18, color=(200, 200, 210, 255), parent=dl)
 
 # ---------------- Tabs ----------------
 def _build_project_params_tab(parent):
@@ -893,6 +991,10 @@ def build_ui():
 
     tab_util = dpg.add_tab(label="Utility", parent=tab_bar)
     _build_utility_tab(tab_util)
+
+    tab_help = dpg.add_tab(label="Help", parent=tab_bar)
+    _build_help_tab(tab_help)
+   
 
 def main():
     dpg.create_context()

@@ -16,7 +16,6 @@ Root {
  int16Lut sRGB
  logLut Cineon
  floatLut linear
- onScriptLoad "\n"
 }
 BackdropNode {
  inputs 0

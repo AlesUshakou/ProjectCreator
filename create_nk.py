@@ -206,12 +206,15 @@ def _set_root_first_last_fps(nk: str, first_frame: int, last_frame: int, fps: in
     return nk[:s] + block2 + nk[e:]
 
 def _insert_on_script_load(nk: str, log=print) -> str:
-    """Одна строка без [] перед закрывающей } в Root."""
     line = (
-        " onScriptLoad \"import nuke; n=nuke.toNode('Read_source'); "
+        " onScriptLoad \"import nuke; "
+        "n=nuke.toNode('Read_source'); "
         "w=int(n.metadata('input/width') or n.width()) if n else 0; "
         "h=int(n.metadata('input/height') or n.height()) if n else 0; "
-        "fn=f'PC_auto_{w}x{h}'; nuke.addFormat(f'{w} {h} {fn}'); nuke.root()['format'].setValue(fn)\"\n"
+        "pa=float(n.metadata('input/pixel_aspect')) if (n and n.metadata('input/pixel_aspect')) else 1; "
+        "fn=f'PC_auto_{w}x{h}'; "
+        "nuke.addFormat(f'{w} {h} {pa} {fn}'); "
+        "nuke.root()['format'].setValue(fn)\"\\n"
     )
     found = _find_root(nk)
     if not found:
