@@ -258,7 +258,7 @@ You may use, modify, and distribute this software freely with credit.
 For suggestions, contributions, or bug reports —  
 open an issue or pull request on GitHub.  
 
-📎 Connect with the author on [LinkedIn](https://www.linkedin.com/in/ale%C5%A1-ushakou-84250814/)  
+📎 Connect with the author on [LinkedIn](https://www.linkedin.com/in/ales-ushakou/)  
 💻 GitHub: [AlesUshakou/ProjectCreator](https://github.com/AlesUshakou/ProjectCreator)
 
 ---
